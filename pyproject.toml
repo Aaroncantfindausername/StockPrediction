@@ -5,14 +5,29 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "backtesting>=0.6.5",
-    "ipython>=9.14.1",
-    "matplotlib>=3.11.0",
-    "numpy>=2.2.6",
-    "pandas>=2.3.3",
-    "pandas-ta>=0.4.71b0",
-    "scikit-learn>=1.9.0",
-    "seaborn>=0.13.2",
-    "torch>=2.12.0",
-    "yfinance>=1.4.1",
+  "backtesting>=0.6.5",
+  "ipython>=9.14.1",
+  "matplotlib>=3.11.0",
+  "numpy>=2.2.6",
+  "pandas>=2.3.3",
+  "pandas-stubs>=3.0.3.260530",
+  "pandas-ta>=0.4.71b0",
+  "scikit-learn>=1.9.0",
+  "seaborn>=0.13.2",
+  "torch>=2.12.0",
+  "yfinance>=1.4.1",
 ]
+[tool.basedpyright]
+typeCheckingMode = "standard" # Keeps good checks like unused imports, basic type mismatches
+
+# But relax the data-science specific ones:
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportMissingTypeStubs = false
+reportInvalidCast = false
+reportArgumentType = "warning"
+
+# Keep the helpful ones:
+reportUnusedImport = "error"      # Good to catch
+reportGeneralTypeIssues = "error" # Catches real bugs (e.g., int vs str)
