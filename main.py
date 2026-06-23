@@ -1,8 +1,13 @@
 # %%
+from backtesting import Backtest
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
+from stragegy.simple_moving_average import SmaCross
+from backtesting.test import GOOG
+from data import preprocess
+import torch
 
 
 # %%
@@ -20,18 +25,13 @@ def load_dataset(ticker: str) -> pd.DataFrame:
 # %%
 
 
-def main():
-    df: pd.DataFrame = load_dataset("^GSPC")
-    df.dropna(inplace=True)
-    df.drop(0, inplace=True)
-    df.index = pd.to_datetime(df["Price"])
-    df = df.drop("Price", axis=1)
-    df = df[["Close", "Open", "Low", "High", "Volume"]].astype(np.float64)
-    df.info()
-    print(df.head())
-
+# def main():
+device = "cuda" if torch.cuda.is_available() else "cpu"
+df: pd.DataFrame = load_dataset("^GSPC")
+df = preprocess.preprocess_dataset(df)
+preprocess.add_indicator(df, "sma", ["close"])
 
 # %%
 
 if __name__ == "__main__":
-    main()
+    pass
