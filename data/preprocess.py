@@ -1,10 +1,17 @@
 from typing import Any
-
+import yfinance as yf
 from numpy.typing import NDArray
 import pandas as pd
 import talib
 import numpy as np
 from talib import abstract
+
+
+def download_datasets(ticker: str) -> None:
+    data = yf.download(ticker, start="2000-01-01", end="2025-12-31")
+    if data is None:
+        raise ValueError("Failed to download dataset")
+    data.to_csv(f"datasets/{ticker}.csv")
 
 
 def load_dataset(ticker: str) -> pd.DataFrame:
@@ -25,13 +32,32 @@ def preprocess_dataset(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_indicator(
-    df: pd.DataFrame, indicator_name: str, columns: list[str], *args, **kwargs
+    df: pd.DataFrame,
+    indicator_name: str,
+    columns: list[str],
+    custom_name: str = "",
+    *args,
+    **kwargs,
 ) -> None:
     try:
         indicator_func = abstract.Function(indicator_name)
     except Exception as e:
         print(f"Indicator {indicator_name} not found or error: {e}")
         return
+
+    if "timeperiod" in indicator_func.parameters:
+        if "timeperiod" in kwargs:
+            indicator_name = f"{indicator_name}_{kwargs.get('timeperiod')}"
+        else:
+            try:
+                indicator_name = f"{indicator_name}_{indicator_func.parameters.get('timeperiod')}"
+            except Exception as e:
+                print(
+                    f"Setting timeperiod for {indicator_name} failed error: {e}"
+                )
+                return
+    if custom_name != "":
+        indicator_name = custom_name
     if indicator_name in df.columns:
         print(
             f"Indicator {indicator_name} is already in the dataframe, cannot add again."
