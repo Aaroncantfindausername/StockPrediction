@@ -4,9 +4,10 @@ import torch.optim as optim
 import numpy as np
 from models.basic_nn import MLP
 from talib import abstract
-from train.pipeline import *
 import copy
 from data.preprocess import add_indicator, load_dataset, preprocess_dataset
+from train.pipeline import train_epoch, load_data, evaluate
+from data import single_ticker_minimal
 
 # Hyperparameters
 config = {
@@ -27,21 +28,18 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 # Load dataset
-ticker = "^GSPC"
-
+X, y = single_ticker_minimal.get_data()
 # %%
 
 # Load data
-# train_loader, val_loader, test_loader, input_dim, num_classes = load_data(
-#     batch_size=config["batch_size"]
-# )
+train_loader, val_loader, test_loader, input_dim = load_data(
+    X, y, batch_size=config["batch_size"]
+)
 
 # Model, loss, optimizer
 
-model = MLP(input_dim, config["hidden_dim"], num_classes, config["dropout"]).to(
-    device
-)
-criterion = nn.CrossEntropyLoss()
+model = MLP(input_dim, config["hidden_dim"], 1, config["dropout"]).to(device)
+criterion = nn.HuberLoss()
 optimizer = optim.Adam(
     model.parameters(), lr=config["lr"], weight_decay=config["weight_decay"]
 )
@@ -80,11 +78,10 @@ for epoch in range(1, config["epochs"] + 1):
 
 # Load best weights for final evaluation
 model.load_state_dict(best_model_wts)
-test_loss, test_acc = evaluate(model, test_loader, criterion, device)
-print(f"\nTest Loss: {test_loss:.4f} | Test Acc: {test_acc:.4f}")
-
+test_loss, test_mae = evaluate(model, test_loader, criterion, device)
+print(f"\nTest Loss: {test_loss:.4f} | Test MAE: {test_mae:.4f}")
 # Save final model (optional)
-# torch.save(model.state_dict(), "final_model.pth")
-# print("Model weights saved to final_model.pth")
+torch.save(model.state_dict(), "weights/basic_nn.pth")
+print("Model weights saved")
 if __name__ == "__main__":
     pass

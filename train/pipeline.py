@@ -27,12 +27,12 @@ def load_data(
     val_ratio: float = 0.15,
     test_ratio: float = 0.15,
     random_state: int = 42,
-) -> Tuple[DataLoader, DataLoader, DataLoader, int, int]:
-    # Synthetic data: 1000 samples, 20 features, 3 classes
-
+) -> Tuple[DataLoader, DataLoader, DataLoader, int]:
     # Split into train+val (70%) and test (30%) first
+    X = X.astype(np.float32)
+    y = y.astype(np.float32)
     X_trainval, X_test, y_trainval, y_test = train_test_split(
-        X, y, test_size=test_ratio, random_state=random_state, stratify=y
+        X, y, test_size=test_ratio, random_state=random_state
     )
     # Split train+val into train and validation
     val_size_from_trainval = val_ratio / (1 - test_ratio)
@@ -41,7 +41,6 @@ def load_data(
         y_trainval,
         test_size=val_size_from_trainval,
         random_state=random_state,
-        stratify=y_trainval,
     )
 
     # Convert to tensors and create TensorDatasets
@@ -67,7 +66,6 @@ def load_data(
         val_loader,
         test_loader,
         X_train.shape[1],  # input dimension
-        len(np.unique(y)),  # n.o classes
     )
 
 
@@ -85,7 +83,7 @@ def train_epoch(model, loader, criterion, optimizer, device) -> float:
     for inputs, targets in loader:
         inputs, targets = inputs.to(device), targets.to(device)
         optimizer.zero_grad()
-        outputs = model(inputs)
+        outputs = model(inputs).squeeze()
         loss = criterion(outputs, targets)
         loss.backward()
         optimizer.step()
@@ -95,20 +93,22 @@ def train_epoch(model, loader, criterion, optimizer, device) -> float:
 
 def evaluate(model, loader, criterion, device) -> Tuple[float, float]:
     model.eval()
-    running_loss = 0.0
+    running_loss: float = 0.0
     all_preds = []
     all_targets = []
     with torch.no_grad():
         for inputs, targets in loader:
             inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model(inputs)
+            outputs = model(inputs).squeeze()
             loss = criterion(outputs, targets)
             running_loss += loss.item() * inputs.size(0)
-            _, preds = torch.max(outputs, 1)
-            all_preds.extend(preds.cpu().numpy())
+            all_preds.extend(outputs.cpu().numpy())
             all_targets.extend(targets.cpu().numpy())
-    acc = accuracy_score(all_targets, all_preds)
-    return running_loss / len(loader.dataset), acc
+    avg_loss: float = running_loss / len(loader.dataset)
+    mae: float = np.mean(
+        np.abs(np.array(all_preds) - np.array(all_targets))
+    ).item()
+    return (avg_loss, mae)
 
 
 # -------------------------------
