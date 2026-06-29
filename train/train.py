@@ -6,7 +6,7 @@ from models.basic_nn import MLP
 from talib import abstract
 import copy
 from data.preprocess import add_indicator, load_dataset, preprocess_dataset
-from train.pipeline import train_epoch, load_data, evaluate
+from train.pipeline import train_epoch, train_val_split, evaluate
 from data import single_ticker_minimal
 
 # Hyperparameters
@@ -35,7 +35,7 @@ X, y = single_ticker_minimal.get_features_labels(df, ticker)
 # %%
 
 # Load data
-train_loader, val_loader, test_loader, input_dim = load_data(
+train_loader, val_loader, test_loader, input_dim = train_val_split(
     X, y, batch_size=config["batch_size"]
 )
 

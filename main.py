@@ -6,7 +6,7 @@ from models.basic_nn import MLP
 from talib import abstract
 import copy
 from data.preprocess import add_indicator, load_dataset, preprocess_dataset
-from train.pipeline import train_epoch, load_data, evaluate
+from train.pipeline import train_epoch, train_val_split, evaluate
 from data import single_ticker_minimal
 
 if __name__ == "__main__":

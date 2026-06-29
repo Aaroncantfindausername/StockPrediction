@@ -24,10 +24,6 @@ def preprocess_dataset(df: pd.DataFrame) -> pd.DataFrame:
     df.index = pd.to_datetime(df["Price"])
     df = df.drop("Price", axis=1)
     df = df[["Close", "Open", "Low", "High", "Volume"]].astype(np.float64)
-    df.rename(
-        columns={col_name: col_name.lower() for col_name in df.columns},
-        inplace=True,
-    )
     return df
 
 

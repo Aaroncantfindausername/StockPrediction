@@ -32,34 +32,34 @@ def get_features_labels(
         "volume_ratio",
     ]
     # Adding indicators
-    df["rsi_7"] = talib.RSI(df["close"], timeperiod=7)
+    df["rsi_7"] = talib.RSI(df["Close"], timeperiod=7)
 
-    df["rsi_14"] = talib.RSI(df["close"], timeperiod=14)
+    df["rsi_14"] = talib.RSI(df["Close"], timeperiod=14)
 
     df["macd_hist"] = talib.MACD(
-        df["close"], fastperiod=12, slowperiod=26, signalperiod=9
+        df["Close"], fastperiod=12, slowperiod=26, signalperiod=9
     )[2]
-    df["stochk"], df["stochd"] = talib.STOCH(df["high"], df["low"], df["close"])
-    df["adx_14"] = talib.ADX(df["high"], df["low"], df["close"])
+    df["stochk"], df["stochd"] = talib.STOCH(df["High"], df["Low"], df["Close"])
+    df["adx_14"] = talib.ADX(df["High"], df["Low"], df["Close"])
     df["bbands_20_upper"], df["bbands_20_middle"], df["bbands_20_lower"] = (
-        talib.BBANDS(df["close"], timeperiod=20)
+        talib.BBANDS(df["Close"], timeperiod=20)
     )
-    df["pct_b_20"] = (df["close"] - df["bbands_20_lower"]) / (
+    df["pct_b_20"] = (df["Close"] - df["bbands_20_lower"]) / (
         df["bbands_20_upper"] - df["bbands_20_lower"]
     )
-    df["atr_14"] = talib.ATR(df["high"], df["low"], df["close"])
-    df["atr_14_norm"] = df["atr_14"] / df["close"]
-    df["ema_50"] = talib.EMA(df["close"], timeperiod=50)
-    df["ema_200"] = talib.EMA(df["close"], timeperiod=200)
-    df["dist_ema_50"] = (df["close"] - df["ema_50"]) / df["ema_50"]
-    df["dist_ema_200"] = (df["close"] - df["ema_200"]) / df["ema_200"]
-    df["obv"] = talib.OBV(df["close"], df["volume"])
+    df["atr_14"] = talib.ATR(df["High"], df["Low"], df["Close"])
+    df["atr_14_norm"] = df["atr_14"] / df["Close"]
+    df["ema_50"] = talib.EMA(df["Close"], timeperiod=50)
+    df["ema_200"] = talib.EMA(df["Close"], timeperiod=200)
+    df["dist_ema_50"] = (df["Close"] - df["ema_50"]) / df["ema_50"]
+    df["dist_ema_200"] = (df["Close"] - df["ema_200"]) / df["ema_200"]
+    df["obv"] = talib.OBV(df["Close"], df["Volume"])
     df["obv_roc_5"] = talib.ROC(df["obv"], timeperiod=5)
-    df["vol_sma_20"] = talib.SMA(df["volume"], timeperiod=20)
-    df["volume_ratio"] = df["volume"] / df["vol_sma_20"]
+    df["vol_sma_20"] = talib.SMA(df["Volume"], timeperiod=20)
+    df["volume_ratio"] = df["Volume"] / df["vol_sma_20"]
     # Calculate forward return
-    df["future_close_5"] = df["close"].shift(-HORIZON)
-    df["target_return"] = (df["future_close_5"] - df["close"]) / df["close"]
+    df["future_close_5"] = df["Close"].shift(-HORIZON)
+    df["target_return"] = (df["future_close_5"] - df["Close"]) / df["Close"]
     for col in columns:
         df[f"{col}_z"] = rolling_z_score(df[col])
     df.dropna(inplace=True)

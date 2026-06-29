@@ -20,7 +20,7 @@ import copy
 # -------------------------------
 # 1. Dataset loading & splitting
 # -------------------------------
-def load_data(
+def train_val_split(
     X: NDArray,
     y: NDArray,
     batch_size: int = 64,
