@@ -2,6 +2,7 @@ from typing import Tuple, final
 import talib
 from numpy.typing import NDArray
 import pandas as pd
+import numpy as np
 
 from data.preprocess import load_dataset, preprocess_dataset
 
@@ -10,14 +11,12 @@ def rolling_z_score(series: pd.Series, window=252, min_periods=50) -> pd.Series:
     rolling_mean = series.rolling(window, min_periods=min_periods).mean()
     rolling_std = series.rolling(window, min_periods=min_periods).std()
     z = (series - rolling_mean) / rolling_std
-    return z
+    return z.astype(np.float32)
 
 
-def get_data() -> Tuple[NDArray, NDArray]:
-    ticker: str = "^GSPC"
-    HORIZON: int = 5
-    df = load_dataset(ticker)
-    df = preprocess_dataset(df)
+def get_features_labels(
+    df: pd.DataFrame, ticker: str, HORIZON: int = 5
+) -> Tuple[NDArray, NDArray]:
     columns: list[str] = [
         "rsi_7",
         "rsi_14",
