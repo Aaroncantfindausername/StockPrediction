@@ -109,11 +109,3 @@ def evaluate(model, loader, criterion, device) -> Tuple[float, float]:
         np.abs(np.array(all_preds) - np.array(all_targets))
     ).item()
     return (avg_loss, mae)
-
-
-# -------------------------------
-# 4. Main training script
-# -------------------------------
-# %%
-
-# %%

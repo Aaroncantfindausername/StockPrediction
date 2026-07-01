@@ -15,7 +15,7 @@ def rolling_z_score(series: pd.Series, window=252, min_periods=50) -> pd.Series:
 
 
 def get_features_labels(
-    df: pd.DataFrame, ticker: str, HORIZON: int = 5
+    df: pd.DataFrame, HORIZON: int = 5
 ) -> Tuple[NDArray, NDArray]:
     columns: list[str] = [
         "rsi_7",
