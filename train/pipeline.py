@@ -1,6 +1,6 @@
 # %%
 from typing import Any, Tuple
-
+import pandas as pd
 from numpy.typing import NDArray
 from pandas import DataFrame
 import torch
@@ -8,12 +8,15 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset, random_split
 import numpy as np
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import TimeSeriesSplit, train_test_split
 from sklearn.metrics import accuracy_score
 from data import preprocess
 from data.preprocess import load_dataset, preprocess_dataset
+from data.single_ticker_minimal import get_features_labels
 from models.basic_nn import MLP
 import copy
+
+from sklearn.model_selection import ParameterSampler
 
 
 # %%
@@ -26,21 +29,17 @@ def train_val_split(
     batch_size: int = 64,
     val_ratio: float = 0.15,
     test_ratio: float = 0.15,
-    random_state: int = 42,
 ) -> Tuple[DataLoader, DataLoader, DataLoader, int]:
     # Split into train+val (70%) and test (30%) first
     X = X.astype(np.float32)
     y = y.astype(np.float32)
     X_trainval, X_test, y_trainval, y_test = train_test_split(
-        X, y, test_size=test_ratio, random_state=random_state
+        X, y, test_size=test_ratio, shuffle=False
     )
     # Split train+val into train and validation
     val_size_from_trainval = val_ratio / (1 - test_ratio)
     X_train, X_val, y_train, y_val = train_test_split(
-        X_trainval,
-        y_trainval,
-        test_size=val_size_from_trainval,
-        random_state=random_state,
+        X_trainval, y_trainval, test_size=val_size_from_trainval, shuffle=False
     )
 
     # Convert to tensors and create TensorDatasets
@@ -69,9 +68,52 @@ def train_val_split(
     )
 
 
-# -------------------------------
-# 2. Model class template
-# -------------------------------
+def walk_forward_validation_outer(
+    df: DataFrame,
+    columns: list[str],
+    training_years: int,
+    test_years: int,
+    HORIZON: int,
+    param_grid,
+):
+    MIN_TEST_PERIOD = pd.DateOffset(months=6)
+    start_train_date = df.index[0]
+    end_train_date = df.index[0] + pd.DateOffset(years=training_years, days=-1)
+    start_test_date = df.index[0] + pd.DateOffset(
+        years=training_years, days=HORIZON
+    )  # Offset by HORIZON (purging)
+    data_end_date = df.index[-1]
+    while start_test_date + MIN_TEST_PERIOD < data_end_date:
+        end_test_date = min(
+            start_test_date + pd.DateOffset(years=test_years), data_end_date
+        )
+        train_data = df[start_train_date:end_train_date]
+        test_data = df[start_test_date:end_test_date]
+        hyperparams = tune_hyperparams_inner(
+            train_data, param_grid, 6, 1, HORIZON
+        )
+
+
+def tune_hyperparams_inner(
+    df: DataFrame,
+    param_grid,
+    splits: int,
+    randomState: int = 67,
+    num_trials: int = 64,
+):
+    rng = np.random.RandomState(randomState)
+    param_sampler = ParameterSampler(
+        param_grid, n_iter=num_trials, random_state=rng
+    )
+    for params in param_sampler:
+        best_loss = float("inf")
+        best_params = None
+        tscv = TimeSeriesSplit(n_splits=splits)
+        X, y = get_features_labels(df, params)
+        for i, (train_idx, test_idx) in enumerate(tscv.split(X)):
+            print(f"Fold {i}:")
+            X_train, X_test = X[train_idx], X[test_idx]
+            y_train, y_test = y[train_idx], y[test_idx]
 
 
 # -------------------------------

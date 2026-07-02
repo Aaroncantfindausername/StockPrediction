@@ -11,10 +11,9 @@ import torch
 
 
 # %%
-def backtest() -> None:
+def backtest(ticker: str = "^GSPC") -> None:
     model_path = "weights/basic_nn.pth"
     model_config_path = "weights/basic_nn_dim.pth"
-    ticker: str = "^GSPC"
     df = load_dataset(ticker)
     df = preprocess_dataset(df)
 
