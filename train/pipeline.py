@@ -1,21 +1,18 @@
 # %%
-from typing import Any, Tuple
+from typing import Any, Dict, Tuple
+import optuna
 import pandas as pd
 from numpy.typing import NDArray
 from pandas import DataFrame
 import torch
-import torch.nn as nn
-import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset, random_split
 import numpy as np
 from sklearn.model_selection import TimeSeriesSplit, train_test_split
-from sklearn.metrics import accuracy_score
-from data import preprocess
 from data.preprocess import load_dataset, preprocess_dataset
 from data.single_ticker_minimal import get_features_labels
 from models.basic_nn import MLP
 import copy
-
+from optuna.pruners import MedianPruner
 from sklearn.model_selection import ParameterSampler
 
 
@@ -23,7 +20,7 @@ from sklearn.model_selection import ParameterSampler
 # -------------------------------
 # 1. Dataset loading & splitting
 # -------------------------------
-def train_val_split(
+def train_val_test_split(
     X: NDArray,
     y: NDArray,
     batch_size: int = 64,
@@ -89,15 +86,19 @@ def walk_forward_validation_outer(
         )
         train_data = df[start_train_date:end_train_date]
         test_data = df[start_test_date:end_test_date]
-        hyperparams = tune_hyperparams_inner(
-            train_data, param_grid, 6, 1, HORIZON
-        )
+        pruner = MedianPruner(n_startup_trials=5, n_warmup_steps=5)
+        study = optuna.create_study(direction="minimize", pruner=pruner)
+        study.optimize(objective, n_trials=100, timeout=600)
 
 
 def tune_hyperparams_inner(
     df: DataFrame,
     param_grid,
     splits: int,
+    device: str,
+    criterion,
+    optimizer,
+    scheduler,
     randomState: int = 67,
     num_trials: int = 64,
 ):
@@ -105,21 +106,50 @@ def tune_hyperparams_inner(
     param_sampler = ParameterSampler(
         param_grid, n_iter=num_trials, random_state=rng
     )
+
+    best_loss = float("inf")
+    best_params = None
     for params in param_sampler:
-        best_loss = float("inf")
-        best_params = None
         tscv = TimeSeriesSplit(n_splits=splits)
         X, y = get_features_labels(df, params)
         for i, (train_idx, test_idx) in enumerate(tscv.split(X)):
             print(f"Fold {i}:")
             X_train, X_test = X[train_idx], X[test_idx]
             y_train, y_test = y[train_idx], y[test_idx]
+            model = MLP(X_train.shape[1], 1, params).to(device)
+
+            train_dataset = TensorDataset(
+                torch.from_numpy(X_train), torch.from_numpy(y_train)
+            )
+            test_dataset = TensorDataset(
+                torch.from_numpy(X_test), torch.from_numpy(y_test)
+            )
+            batch_size = params.get("batch_size", 64)
+            train_loader = DataLoader(
+                train_dataset, batch_size=batch_size, shuffle=True
+            )
+            test_loader = DataLoader(
+                test_dataset, batch_size=batch_size, shuffle=False
+            )
+            epochs = params.get("epochs", 50)
+            train_and_eval(
+                model,
+                train_loader,
+                test_loader,
+                criterion,
+                optimizer,
+                scheduler,
+                device,
+                epochs,
+            )
 
 
 # -------------------------------
 # 3. Training and evaluation loops
 # -------------------------------
-def train_epoch(model, loader, criterion, optimizer, device) -> float:
+def train_epoch(
+    model, loader: DataLoader[Any], criterion, optimizer, device: str
+) -> float:
     model.train()
     running_loss = 0.0
     for inputs, targets in loader:
@@ -133,7 +163,7 @@ def train_epoch(model, loader, criterion, optimizer, device) -> float:
     return running_loss / len(loader.dataset)
 
 
-def evaluate(model, loader, criterion, device) -> Tuple[float, float]:
+def evaluate(model, loader: DataLoader[Any], criterion, device: str) -> float:
     model.eval()
     running_loss: float = 0.0
     all_preds = []
@@ -147,7 +177,26 @@ def evaluate(model, loader, criterion, device) -> Tuple[float, float]:
             all_preds.extend(outputs.cpu().numpy())
             all_targets.extend(targets.cpu().numpy())
     avg_loss: float = running_loss / len(loader.dataset)
-    mae: float = np.mean(
-        np.abs(np.array(all_preds) - np.array(all_targets))
-    ).item()
-    return (avg_loss, mae)
+    return avg_loss
+
+
+def train_and_eval(
+    model,
+    train_loader,
+    test_loader,
+    criterion,
+    optimizer,
+    scheduler,
+    device,
+    epochs,
+) -> float:
+    """
+    Assumes scheduler is epoch level scheduler and takes no params
+    """
+    for epoch in range(1, epochs + 1):
+        train_loss = train_epoch(
+            model, train_loader, criterion, optimizer, device
+        )
+        scheduler.step()
+        print(f"Epoch {epoch:2d}/{epochs} | Train Loss: {train_loss:.4f}")
+    return evaluate(model, test_loader, criterion, device)

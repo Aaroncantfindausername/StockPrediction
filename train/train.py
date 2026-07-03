@@ -5,7 +5,7 @@ import numpy as np
 from models.basic_nn import MLP
 import copy
 from data.preprocess import load_dataset, preprocess_dataset
-from train.pipeline import train_epoch, train_val_split, evaluate
+from train.pipeline import train_epoch, train_val_test_split, evaluate
 from data import single_ticker_minimal
 
 
@@ -37,15 +37,12 @@ def train() -> None:
     # %%
 
     # Load data
-    train_loader, val_loader, test_loader, input_dim = train_val_split(
+    train_loader, val_loader, test_loader, input_dim = train_val_test_split(
         X, y, batch_size=config["batch_size"]
     )
 
     # Model, loss, optimizer
 
-    model = MLP(
-        input_dim, config["hidden_dim"], config["out_dim"], config["dropout"]
-    ).to(device)
     criterion = nn.HuberLoss()
     optimizer = optim.Adam(
         model.parameters(), lr=config["lr"], weight_decay=config["weight_decay"]

@@ -9,6 +9,7 @@ dependencies = [
   "ipython>=9.14.1",
   "matplotlib>=3.11.0",
   "numpy>=2.2.6",
+  "optuna>=4.9.0",
   "pandas>=2.3.3",
   "pandas-stubs>=3.0.3.260530",
   "pandas-ta>=0.4.71b0",
