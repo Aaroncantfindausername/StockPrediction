@@ -5,7 +5,7 @@ import numpy as np
 from models.basic_nn import MLP
 import copy
 from data.preprocess import load_dataset, preprocess_dataset
-from train.pipeline import train_epoch, train_val_test_split, evaluate
+from train.pipeline import train_val_test_split_loader
 from data import single_ticker_minimal
 
 
@@ -33,14 +33,16 @@ def train() -> None:
     ticker: str = "^GSPC"
     df = load_dataset(ticker)
     df = preprocess_dataset(df)
+
     X, y = single_ticker_minimal.get_features_labels(df)
     # %%
 
     # Load data
-    train_loader, val_loader, test_loader, input_dim = train_val_test_split(
-        X, y, batch_size=config["batch_size"]
+    train_loader, val_loader, test_loader, input_dim = (
+        train_val_test_split_loader(
+            X, y, val_ratio=0, batch_size=config["batch_size"]
+        )
     )
-
     # Model, loss, optimizer
 
     criterion = nn.HuberLoss()

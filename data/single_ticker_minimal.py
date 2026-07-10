@@ -16,7 +16,7 @@ def rolling_z_score(series: pd.Series, window=252, min_periods=50) -> pd.Series:
 
 def get_features_labels(
     df: pd.DataFrame, params: Dict[str, Any] = {}
-) -> Tuple[NDArray, NDArray]:
+) -> Tuple[NDArray[np.float32], NDArray[np.float32]]:
     HORIZON: int = params.get("HORIZON", 5)
     columns: list[str] = [
         "rsi_slow",
@@ -31,6 +31,7 @@ def get_features_labels(
         "dist_ema_slow",
         "obv_roc",
         "volume_ratio",
+        "target_return",
     ]
     # Adding indicators
     rsi_fast_t = params.get("rsi_fast_t", 7)
@@ -93,5 +94,5 @@ def get_features_labels(
         df[f"{col}_z"] = rolling_z_score(df[col])
     df.dropna(inplace=True)
     return df[[f"{c}_z" for c in columns]].to_numpy(), df[
-        "target_return"
+        "target_return_z"
     ].to_numpy()
