@@ -74,18 +74,25 @@ def train() -> None:
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", patience=10000, factor=0.5
     )
-    train_full(
-        model,
-        train_loader,
-        val_loader,
-        criterion,
-        optimizer,
-        scheduler,
-        device,
-        10000,
-        10000,
-    )
-    # Load best weights for final evaluation
-    test_loss = evaluate(model, test_loader, criterion, device)
 
-    print(f"\nTest Loss: {test_loss:.10f}")
+    fixed_inputs, fixed_targets = next(iter(train_loader))
+    fixed_inputs, fixed_targets = (
+        fixed_inputs.to(device),
+        fixed_targets.to(device),
+    )
+
+    # Loss in train mode (dropout on, as during train_epoch)
+    model.train()
+    with torch.no_grad():
+        train_mode_loss = criterion(model(fixed_inputs), fixed_targets).item()
+    # Loss in eval mode (as evaluate would see)
+    model.eval()
+    with torch.no_grad():
+        eval_mode_loss = criterion(model(fixed_inputs), fixed_targets).item()
+
+    print(
+        f"Fixed batch loss – train mode: {train_mode_loss:.6f}, eval mode: {eval_mode_loss:.6f}"
+    )
+
+
+# Freeze a small batch from the training set for comparison

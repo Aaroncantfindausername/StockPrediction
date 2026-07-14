@@ -1,7 +1,10 @@
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, final
 import talib
+from numpy.typing import NDArray
 import pandas as pd
 import numpy as np
+
+from data.preprocess import load_dataset, preprocess_dataset
 
 
 def rolling_z_score(series: pd.Series, window=252, min_periods=50) -> pd.Series:
@@ -92,4 +95,18 @@ def compute_features_and_labels(
         df[f"{col}_z"] = rolling_z_score(df[col])
     df["target_scaled_z"] = rolling_z_score(df["target_scaled"])
     df["target_return_z"] = rolling_z_score(df["target_return"])
+    # Lag features
+    lags = params.get("lags", [1, 2, 3, 5])
+    lagged_features = [
+        "rsi_fast",
+        "macd_hist",
+        "pct_b",
+        "atr_norm",
+        "dist_ema_fast",
+        "volume_ratio",
+    ]
+    for feat in lagged_features:
+        for lag in lags:
+            df[f"{feat}_lag{lag}_z"] = df[f"{feat}_z"].shift(lag)
+            columns.append(f"{feat}_lag{lag}")
     return columns, df

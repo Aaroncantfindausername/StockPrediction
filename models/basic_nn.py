@@ -9,10 +9,13 @@ class MLP(nn.Module):
     A simple multi-layer perceptron.
     """
 
-    def __init__(self, input_dim: int, out_dim: int, params: Dict[str, Any]):
-        hidden_dims: list[int] = params.get("hidden_dims", [128, 256, 128])
-        dropout = params.get("dropout", 0.2)
-        layers = params.get("n_layers", 3)
+    def __init__(
+        self, input_dim: int, out_dim: int, params: Dict[str, Any] = {}
+    ):
+        hidden_dim: int = params.get("hidden_dim", 256)
+        hidden_dim_decay: int = params.get("hidden_dim_decay", 0.5)
+        dropout = params.get("dropout_rate", 0.2)
+        n_layers: int = params.get("n_layers", 3)
         activation_str = params.get("activation", "relu")
         act_params = params.get("activation_params", [])
         match activation_str:
@@ -34,11 +37,13 @@ class MLP(nn.Module):
         super().__init__()
         layers = []
         prev_dim = input_dim
-        for h_dim in hidden_dims:
-            layers.append(nn.Linear(prev_dim, h_dim))
+        for i in range(n_layers):
+            hidden_out_dim = int(hidden_dim * (hidden_dim_decay**i))
+            layers.append(nn.Linear(prev_dim, hidden_out_dim))
+            layers.append(nn.BatchNorm1d(hidden_out_dim))
             layers.append(activation_fn)
             layers.append(nn.Dropout(dropout))
-            prev_dim = h_dim
+            prev_dim = hidden_out_dim
         layers.append(nn.Linear(prev_dim, out_dim))
         self.net = nn.Sequential(*layers)
 

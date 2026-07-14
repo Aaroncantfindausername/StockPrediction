@@ -1,7 +1,10 @@
-from train.train import train
 from backtest.backtest import backtest
-from train.train_eval import train_predict
+from train.train import train
+from train.train_eval import train_eval
+from train import testing
 
 if __name__ == "__main__":
-    train_predict()
+    testing.train()
+    # train()
+    # train_eval()
     # backtest("^GSPC")

@@ -1,5 +1,6 @@
 # %%
 from typing import Any, Tuple, Union
+from multitasking import Dict
 import optuna
 import pandas as pd
 from numpy.typing import NDArray
@@ -10,10 +11,9 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 import copy
 from optuna.pruners import MedianPruner
-
 from functools import partial
 
-from data.single_ticker_minimal import get_features_labels
+from data.single_ticker_minimal import compute_features_and_labels
 from models.basic_nn import MLP
 
 
@@ -53,7 +53,7 @@ def train_val_test_split_loader(
 
     # Create DataLoaders
     train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True
+        train_dataset, batch_size=batch_size, shuffle=False
     )
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
@@ -68,29 +68,32 @@ def train_val_test_split_loader(
 
 def walk_forward_validation_outer(
     df: DataFrame,
-    training_years: int,
+    min_training_years: int,
+    max_training_years: int,
     test_years: int,
     HORIZON: int,
     device: Union[str, torch.device],
     batch_size: int = 64,
     epochs: int = 100,
-    train_patience: int = 5,
+    train_patience: int = 10,
     random_seed: int = 67,
     n_trials: int = 100,
     trials_timeout: int = 120,
-) -> Tuple[list[DatetimeIndex], list[NDArray]]:
+) -> Tuple[Dict[str, Any], list[NDArray]]:
     import train.nn_objective  # Prevent circular import
 
-    all_start_dates: list[DatetimeIndex] = []
     all_predictions: list[NDArray] = []
     MIN_TEST_PERIOD = pd.DateOffset(months=6)
     start_train_date: DatetimeIndex = df.index[0]
     end_train_date: DatetimeIndex = df.index[0] + pd.DateOffset(
-        years=training_years, days=-(1 + HORIZON)
+        years=min_training_years, days=-(1 + HORIZON)
     )
     start_test_date: DatetimeIndex = df.index[0] + pd.DateOffset(
-        years=training_years
+        years=min_training_years
     )  # Offset by HORIZON (purging)
+
+    config = {"start": start_test_date, "step": test_years}
+    fold = 0
     data_end_date = df.index[-1]
     end_test_date: DatetimeIndex = start_test_date
     while start_test_date + MIN_TEST_PERIOD <= data_end_date:
@@ -98,13 +101,12 @@ def walk_forward_validation_outer(
             start_test_date + pd.DateOffset(years=test_years, days=-1),
             data_end_date,
         )
-        train_data = df[start_train_date:end_train_date]
-        test_data = df[start_test_date:end_test_date]
-        all_start_dates.append(start_test_date)
         objective = partial(
             train.nn_objective.objective_full,
+            start_train_date=start_train_date,
+            end_train_date=end_train_date,
             horizon=HORIZON,
-            df=train_data,
+            df=df,
             device=device,
         )
         pruner = MedianPruner(n_startup_trials=5, n_warmup_steps=1)
@@ -119,27 +121,26 @@ def walk_forward_validation_outer(
         )
         print(f"Hyperparameters optimised:\n {study.best_params}")
         # Retrain model on all of training data using best hyperparams
-        X_trainval, y_trainval = get_features_labels(
-            train_data, study.best_params
+        cols, feature_df = compute_features_and_labels(
+            df[:end_test_date], study.best_params
         )
-        X_test: NDArray
-        y_test: NDArray
-        X_test, y_test = get_features_labels(test_data, study.best_params)
-        X_test = X_test.copy()  # Prevent non writable tensor error
-        y_test = y_test.copy()
+        train_df = feature_df[start_train_date:end_train_date].dropna()
+        test_df = feature_df[start_test_date:end_test_date]
+        X_trainval: NDArray[np.float32] = train_df[
+            [f"{c}_z" for c in cols]
+        ].to_numpy()
+        y_trainval: NDArray[np.float32] = train_df["target_return_z"].to_numpy()
+        X_test: NDArray[np.float32] = test_df[
+            [f"{c}_z" for c in cols]
+        ].to_numpy()
+        assert any(test_df.isna()), "test_df contains na values"
         X_train, X_val, y_train, y_val = train_test_split(
             X_trainval, y_trainval, test_size=0.15, shuffle=False
         )
-
         train_dataset = TensorDataset(
-            torch.from_numpy(X_train), torch.from_numpy(y_train)
+            torch.tensor(X_train), torch.tensor(y_train)
         )
-        val_dataset = TensorDataset(
-            torch.from_numpy(X_val), torch.from_numpy(y_val)
-        )
-        test_dataset = TensorDataset(
-            torch.from_numpy(X_test), torch.from_numpy(y_test)
-        )
+        val_dataset = TensorDataset(torch.tensor(X_val), torch.tensor(y_val))
 
         # Create DataLoaders
         train_loader = DataLoader(
@@ -147,9 +148,6 @@ def walk_forward_validation_outer(
         )
         val_loader = DataLoader(
             val_dataset, batch_size=batch_size, shuffle=False
-        )
-        test_loader = DataLoader(
-            test_dataset, batch_size=batch_size, shuffle=False
         )
         model = MLP(X_train.shape[1], 1, study.best_params).to(device)
         criterion = torch.nn.HuberLoss()
@@ -161,11 +159,11 @@ def walk_forward_validation_outer(
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode="min", patience=5, factor=0.5
         )
-        train_and_eval(
+        print(f"Evaluating years {start_test_date} ~ {end_test_date}")
+        train_full(
             model,
             train_loader,
             val_loader,
-            test_loader,
             criterion,
             optimizer,
             scheduler,
@@ -177,13 +175,17 @@ def walk_forward_validation_outer(
         with torch.no_grad():
             predictions = model(torch.tensor(X_test).to(device)).cpu().numpy()
             all_predictions.append(predictions)
+            print("Predictions calculated")
         # Shift train window to include test window and shift test window forwards
-        start_train_date += pd.DateOffset(years=test_years)
+        fold += 1
         end_train_date += pd.DateOffset(years=test_years)
         start_test_date += pd.DateOffset(years=test_years)
+        if min_training_years + fold * test_years > max_training_years:
+            start_train_date += pd.DateOffset(years=test_years)
+        print(f"Outer fold {fold} complete")
 
-    # Return predictions start and end date and all predictions
-    return (all_start_dates, all_predictions)
+    config["end_date"] = end_test_date
+    return (config, all_predictions)
 
 
 # -------------------------------
@@ -245,6 +247,31 @@ def train_and_eval(
 ) -> float:
     if val_loader is None:
         val_loader = copy.deepcopy(test_loader)
+    train_full(
+        model,
+        train_loader,
+        val_loader,
+        criterion,
+        optimizer,
+        scheduler,
+        device,
+        epochs,
+        patience,
+    )
+    return evaluate(model, test_loader, criterion, device)
+
+
+def train_full(
+    model: torch.nn.Module,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    criterion,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.ReduceLROnPlateau,
+    device: str | torch.device,
+    epochs: int,
+    patience: int,
+):
     best_val_loss = float("inf")
     best_model_wts = copy.deepcopy(model.state_dict())
     epochs_no_improve = 0
@@ -253,8 +280,11 @@ def train_and_eval(
             model, train_loader, criterion, optimizer, device
         )
         val_loss = evaluate(model, val_loader, criterion, device)
+        train_loss_eval = evaluate(model, val_loader, criterion, device)
         scheduler.step(val_loss)
-        print(f"Epoch {epoch:2d}/{epochs} | Train Loss: {train_loss:.4f}")
+        print(
+            f"Epoch {epoch:2d}/{epochs} | Train Loss: {train_loss:.10f}={train_loss_eval} , Val loss: {val_loss:.10f}, "
+        )
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_model_wts = copy.deepcopy(model.state_dict())
@@ -264,6 +294,8 @@ def train_and_eval(
             epochs_no_improve += 1
 
         if epochs_no_improve > patience:
+            print(
+                f"Validation loss not improved for more than {patience} epochs, early stop triggered"
+            )
             break
     model.load_state_dict(best_model_wts)
-    return evaluate(model, test_loader, criterion, device)

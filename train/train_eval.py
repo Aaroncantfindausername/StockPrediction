@@ -4,9 +4,10 @@ import torch
 import numpy as np
 
 
-def train_predict() -> None:
+def train_eval() -> None:
     seed = 67
-    training_years = 5
+    min_training_years = 10
+    max_training_years = 10
     test_years = 1
     HORIZON = 5
     torch.manual_seed(seed)
@@ -15,8 +16,15 @@ def train_predict() -> None:
     df = load_dataset(ticker)
     df = preprocess_dataset(df)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    start_dates, predictions = walk_forward_validation_outer(
-        df, training_years, test_years, HORIZON, device, n_trials=3
+    config, predictions = walk_forward_validation_outer(
+        df,
+        min_training_years,
+        max_training_years,
+        test_years,
+        HORIZON,
+        device,
+        n_trials=10,
+        trials_timeout=120,
     )
-    print(f"Start_date: {start_dates}, n.o predictions: {len(predictions)}")
     torch.save(predictions, "strategy/predictions.pth")
+    torch.save(config, "strategy/pred_config.pth")

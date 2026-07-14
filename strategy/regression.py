@@ -1,18 +1,18 @@
+import numpy as np
 from backtesting import Strategy
 from numpy import float32
 from numpy.typing import NDArray
-import numpy as np
+import torch
 
 
-class SimpleNNRegression(Strategy):
-    model_path: str = "weights/basic_nn.pth"
-    model_config_path: str = "weights/basic_nn_dim.pth"
-    min_buy_threshold: float = 0.001
+class Regression(Strategy):
+    predictions_path: str = "Strategy/predictions.pth"
+    min_buy_threshold: float = 0.002
     close_threshold: float = 0.95
-    y: NDArray[float32] = np.array([])
 
     def init(self) -> None:
-        self.predictions = self.I(lambda: self.y)
+        predictions = torch.load(self.predictions_path)
+        self.predictions = self.I(lambda: predictions)
 
     def next(self) -> None:
         if np.isnan(self.predictions[-1]):
