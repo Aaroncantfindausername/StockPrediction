@@ -81,9 +81,9 @@ def compute_features_and_labels(
     df["future_close"] = df["Close"].shift(-HORIZON)
     df["target_return"] = (df["future_close"] - df["Close"]) / df["Close"]
     df["target_scaled"] = df["target_return"] / df["atr"]
-    for col in columns:
+    for i, col in enumerate(columns):
         df[f"{col}_z"] = rolling_z_score(df[col])
-        col = f"{col}_z"
+        columns[i] = f"{col}_z"
     df["target_scaled_z"] = rolling_z_score(df["target_scaled"])
     df["target_return_z"] = rolling_z_score(df["target_return"])
     return columns, df

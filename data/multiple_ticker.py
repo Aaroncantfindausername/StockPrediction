@@ -14,7 +14,7 @@ def get_feature_target_df(
         ticker_df = preprocess_dataset(ticker_df)
         cs, ticker_df = compute_features_and_labels(ticker_df, params)
         cols = cs
-        ticker_df["Ticker"] = [t]*len(ticker_df)
+        ticker_df["Ticker"] = [t] * len(ticker_df)
         dfs.append(ticker_df)
     df_long = pd.concat(dfs)
     return df_long, cols
