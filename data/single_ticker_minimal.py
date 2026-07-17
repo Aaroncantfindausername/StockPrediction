@@ -1,14 +1,7 @@
 from typing import Any, Dict, Tuple
 import talib
 import pandas as pd
-import numpy as np
-
-
-def rolling_z_score(series: pd.Series, window=252, min_periods=50) -> pd.Series:
-    rolling_mean = series.rolling(window, min_periods=min_periods).mean()
-    rolling_std = series.rolling(window, min_periods=min_periods).std()
-    z = (series - rolling_mean) / rolling_std
-    return z.astype(np.float32)
+from data.preprocess import rolling_z_score
 
 
 def compute_features_and_labels(
@@ -90,6 +83,7 @@ def compute_features_and_labels(
     df["target_scaled"] = df["target_return"] / df["atr"]
     for col in columns:
         df[f"{col}_z"] = rolling_z_score(df[col])
+        col = f"{col}_z"
     df["target_scaled_z"] = rolling_z_score(df["target_scaled"])
     df["target_return_z"] = rolling_z_score(df["target_return"])
     return columns, df

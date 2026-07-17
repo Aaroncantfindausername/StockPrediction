@@ -13,7 +13,7 @@ from train.pipeline import (
     train_full,
     train_val_test_split_loader,
 )
-from data import single_ticker_lagged, single_ticker_minimal
+from data import multiple_ticker, single_ticker_lagged, single_ticker_minimal
 
 
 def train() -> None:
@@ -39,13 +39,10 @@ def train() -> None:
     print(f"Using device: {device}")
 
     # Load dataset
-    ticker: str = "^GSPC"
-    df = load_dataset(ticker)
-    df = preprocess_dataset(df)
+    with open("datasets/subset_tickers.txt", "r") as f:
+        tickers = [line.strip() for line in f if line.strip()]
 
-    cols, df = single_ticker_lagged.compute_features_and_labels(
-        df, {"HORIZON": 20}
-    )
+    df, cols = multiple_ticker.get_feature_target_df(tickers, {"HORIZON": 20})
     df = df.dropna()
     X: NDArray[np.float32] = df[[f"{c}_z" for c in cols]].to_numpy()
     y: NDArray[np.float32] = df["target_return_z"].to_numpy()

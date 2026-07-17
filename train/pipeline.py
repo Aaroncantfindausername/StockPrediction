@@ -53,7 +53,7 @@ def train_val_test_split_loader(
 
     # Create DataLoaders
     train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=False
+        train_dataset, batch_size=batch_size, shuffle=True
     )
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
@@ -198,6 +198,7 @@ def train_epoch(
     optimizer,
     device: str | torch.device,
 ) -> float:
+    batch_loss = None
     model.train()
     running_loss = 0.0
     for inputs, targets in loader:
@@ -205,9 +206,14 @@ def train_epoch(
         optimizer.zero_grad()
         outputs = model(inputs)
         loss = criterion(outputs, targets)
+        batch_loss = loss.item()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         running_loss += loss.item() * inputs.size(0)
+
+        # print(f"Batch loss: {batch_loss:.4f}")
+    print(f"Epoch train eval: {evaluate(model, loader, criterion, device)}")
     return running_loss / len(loader.dataset)
 
 
@@ -233,34 +239,6 @@ def evaluate(
     return avg_loss
 
 
-def train_and_eval(
-    model: torch.nn.Module,
-    train_loader: DataLoader,
-    val_loader: DataLoader | None,
-    test_loader: DataLoader,
-    criterion,
-    optimizer: torch.optim.Optimizer,
-    scheduler: torch.optim.lr_scheduler.ReduceLROnPlateau,
-    device: str | torch.device,
-    epochs: int,
-    patience: int,
-) -> float:
-    if val_loader is None:
-        val_loader = copy.deepcopy(test_loader)
-    train_full(
-        model,
-        train_loader,
-        val_loader,
-        criterion,
-        optimizer,
-        scheduler,
-        device,
-        epochs,
-        patience,
-    )
-    return evaluate(model, test_loader, criterion, device)
-
-
 def train_full(
     model: torch.nn.Module,
     train_loader: DataLoader,
@@ -280,10 +258,9 @@ def train_full(
             model, train_loader, criterion, optimizer, device
         )
         val_loss = evaluate(model, val_loader, criterion, device)
-        train_loss_eval = evaluate(model, val_loader, criterion, device)
         scheduler.step(val_loss)
         print(
-            f"Epoch {epoch:2d}/{epochs} | Train Loss: {train_loss:.10f}={train_loss_eval} , Val loss: {val_loss:.10f}, "
+            f"Epoch {epoch:2d}/{epochs} | Train Loss: {train_loss:.10f} , Val loss: {val_loss:.10f}, "
         )
         if val_loss < best_val_loss:
             best_val_loss = val_loss

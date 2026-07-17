@@ -4,14 +4,7 @@ from numpy.typing import NDArray
 import pandas as pd
 import numpy as np
 
-from data.preprocess import load_dataset, preprocess_dataset
-
-
-def rolling_z_score(series: pd.Series, window=252, min_periods=50) -> pd.Series:
-    rolling_mean = series.rolling(window, min_periods=min_periods).mean()
-    rolling_std = series.rolling(window, min_periods=min_periods).std()
-    z = (series - rolling_mean) / rolling_std
-    return z.astype(np.float32)
+from data.preprocess import rolling_z_score
 
 
 def compute_features_and_labels(

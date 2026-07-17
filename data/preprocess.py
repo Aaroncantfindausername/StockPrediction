@@ -1,17 +1,18 @@
-from typing import Any
 import yfinance as yf
-from numpy.typing import NDArray
 import pandas as pd
-import talib
 import numpy as np
-from talib import abstract
 
 
-def download_datasets(ticker: str) -> None:
+def download_dataset(ticker: str) -> None:
     data = yf.download(ticker, start="2000-01-01", end="2025-12-31")
     if data is None:
         raise ValueError("Failed to download dataset")
     data.to_csv(f"datasets/{ticker}.csv")
+
+
+def download_list_of_tickers(tickers: list[str]) -> None:
+    for t in tickers:
+        download_dataset(t)
 
 
 def load_dataset(ticker: str) -> pd.DataFrame:
@@ -19,55 +20,18 @@ def load_dataset(ticker: str) -> pd.DataFrame:
 
 
 def preprocess_dataset(df: pd.DataFrame) -> pd.DataFrame:
-    df.dropna(inplace=True)
     df.drop(0, inplace=True)
-    df.index = pd.to_datetime(df["Price"])
-    df = df.drop("Price", axis=1)
-    df = df[["Close", "Open", "Low", "High", "Volume"]].astype(np.float64)
+    df.drop(1, inplace=True)
+    df.rename(columns={"Price": "Date"}, inplace=True)
+    df.index = pd.to_datetime(df["Date"])
+    # df = df.drop("Price", axis=1)
+    df = df[["Close", "Open", "Low", "High", "Volume"]].astype(np.float32)
+    assert len(df) > 10, "df should have more than 10 rows"
     return df
 
 
-def add_indicator(
-    df: pd.DataFrame,
-    indicator_name: str,
-    columns: list[str],
-    custom_name: str = "",
-    *args,
-    **kwargs,
-) -> None:
-    try:
-        indicator_func = abstract.Function(indicator_name)
-    except Exception as e:
-        print(f"Indicator {indicator_name} not found or error: {e}")
-        return
-
-    if "timeperiod" in indicator_func.parameters:
-        if "timeperiod" in kwargs:
-            indicator_name = f"{indicator_name}_{kwargs.get('timeperiod')}"
-        else:
-            try:
-                indicator_name = f"{indicator_name}_{indicator_func.parameters.get('timeperiod')}"
-            except Exception as e:
-                print(
-                    f"Setting timeperiod for {indicator_name} failed error: {e}"
-                )
-                return
-    if custom_name != "":
-        indicator_name = custom_name
-    if indicator_name in df.columns:
-        print(
-            f"Indicator {indicator_name} is already in the dataframe, cannot add again."
-        )
-        return
-
-    try:
-        inputs: list[Any] = [df[col].values for col in columns]
-    except KeyError as e:
-        print(f"Missing column {e}")
-        return
-    result = indicator_func(*inputs, *args, **kwargs)
-    if isinstance(result, list):
-        for out_vals, out_name in zip(result, indicator_func.output_names):
-            df[f"{indicator_name}_{out_name}"] = out_vals
-    else:
-        df[indicator_name] = result
+def rolling_z_score(series: pd.Series, window=252, min_periods=50) -> pd.Series:
+    rolling_mean = series.rolling(window, min_periods=min_periods).mean()
+    rolling_std = series.rolling(window, min_periods=min_periods).std()
+    z = (series - rolling_mean) / rolling_std
+    return z.astype(np.float32)
