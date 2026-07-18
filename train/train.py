@@ -22,11 +22,11 @@ def train() -> None:
         "batch_size": 256,
         "lr": 1e-4,
         "epochs": 50,
-        "n_layers": 1,
-        "hidden_dim": 16,
-        "hidden_dim_decay": 0.75,
+        "n_layers": 3,
+        "hidden_dim": 128,
+        "hidden_dim_decay": 0.5,
         "out_dim": 1,
-        "dropout": 0.4,
+        "dropout": 0.5,
         "weight_decay": 1e-3,
         "seed": 87,
         "scheduler_patience": 30,
@@ -95,4 +95,14 @@ def train() -> None:
     test_loss = evaluate(model, test_loader, criterion, device)
 
     print(f"\nTest Loss: {test_loss:.10f}")
-    torch.save(model, "")
+    model_config = (
+        {
+            "input_dim": input_dim,
+            "n_layers": config["n_layers"],
+            "hidden_dim": config["hidden_dim"],
+            "hidden_dim_decay": config["hidden_dim_decay"],
+        },
+    )
+    torch.save(model.state_dict(), "weights/model.pth")
+    torch.save(model_config, "weights/config.pth")
+    print("Model weights and config stored")
