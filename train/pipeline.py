@@ -217,6 +217,36 @@ def train_epoch(
     return running_loss / len(loader.dataset)
 
 
+def train_epoch_with_embedding(
+    model: torch.nn.Module,
+    loader: DataLoader[Any],
+    criterion,
+    optimizer,
+    device: str | torch.device,
+) -> float:
+    model.train()
+    running_loss = 0.0
+    for inputs, ticker_ids, targets in loader:
+        inputs, ticker_ids, targets = (
+            inputs.to(device),
+            ticker_ids.to(device),
+            targets.unsqueeze(1).to(device),
+        )
+        optimizer.zero_grad()
+        outputs = model(inputs, ticker_ids)
+        loss = criterion(outputs, targets)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+        running_loss += loss.item() * inputs.size(0)
+
+        # print(f"Batch loss: {batch_loss:.4f}")
+    print(
+        f"Epoch train eval: {evaluate_with_embedding(model, loader, criterion, device)}"
+    )
+    return running_loss / len(loader.dataset)
+
+
 def evaluate(
     model: torch.nn.Module,
     loader: DataLoader[Any],
@@ -231,6 +261,32 @@ def evaluate(
         for inputs, targets in loader:
             inputs, targets = inputs.to(device), targets.unsqueeze(1).to(device)
             outputs = model(inputs)
+            loss = criterion(outputs, targets)
+            running_loss += loss.item() * inputs.size(0)
+            all_preds.extend(outputs.cpu().numpy())
+            all_targets.extend(targets.cpu().numpy())
+    avg_loss: float = running_loss / len(loader.dataset)
+    return avg_loss
+
+
+def evaluate_with_embedding(
+    model: torch.nn.Module,
+    loader: DataLoader[Any],
+    criterion,
+    device: Union[str, torch.device],
+) -> float:
+    model.eval()
+    running_loss: float = 0.0
+    all_preds = []
+    all_targets = []
+    with torch.no_grad():
+        for inputs, ticker_ids, targets in loader:
+            inputs, ticker_ids, targets = (
+                inputs.to(device),
+                ticker_ids.to(device),
+                targets.unsqueeze(1).to(device),
+            )
+            outputs = model(inputs, ticker_ids)
             loss = criterion(outputs, targets)
             running_loss += loss.item() * inputs.size(0)
             all_preds.extend(outputs.cpu().numpy())
@@ -258,6 +314,45 @@ def train_full(
             model, train_loader, criterion, optimizer, device
         )
         val_loss = evaluate(model, val_loader, criterion, device)
+        scheduler.step(val_loss)
+        print(
+            f"Epoch {epoch:2d}/{epochs} | Train Loss: {train_loss:.10f} , Val loss: {val_loss:.10f}, "
+        )
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_model_wts = copy.deepcopy(model.state_dict())
+            epochs_no_improve = 0
+            # torch.save(model.state_dict(), "weights/tmp/best_model.pth")
+        else:
+            epochs_no_improve += 1
+
+        if epochs_no_improve > patience:
+            print(
+                f"Validation loss not improved for more than {patience} epochs, early stop triggered"
+            )
+            break
+    model.load_state_dict(best_model_wts)
+
+
+def train_full_with_embedding(
+    model: torch.nn.Module,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    criterion,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.ReduceLROnPlateau,
+    device: str | torch.device,
+    epochs: int,
+    patience: int,
+):
+    best_val_loss = float("inf")
+    best_model_wts = copy.deepcopy(model.state_dict())
+    epochs_no_improve = 0
+    for epoch in range(1, epochs + 1):
+        train_loss = train_epoch_with_embedding(
+            model, train_loader, criterion, optimizer, device
+        )
+        val_loss = evaluate_with_embedding(model, val_loader, criterion, device)
         scheduler.step(val_loss)
         print(
             f"Epoch {epoch:2d}/{epochs} | Train Loss: {train_loss:.10f} , Val loss: {val_loss:.10f}, "

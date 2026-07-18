@@ -4,16 +4,20 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
+from torch.utils.data import DataLoader
 from models.basic_nn import MLP
 import copy
 from data.preprocess import load_dataset, preprocess_dataset
 from matplotlib import pyplot as plt
+from models.embedded_mlp import EmbeddedMLP
 from train.pipeline import (
     evaluate,
     train_full,
+    train_full_with_embedding,
     train_val_test_split_loader,
 )
 from data import multiple_ticker, single_ticker_lagged, single_ticker_minimal
+from train.ticker_embedding_dataset import TickerEmbeddingDataset
 
 
 def train() -> None:
@@ -22,14 +26,19 @@ def train() -> None:
         "batch_size": 256,
         "lr": 1e-4,
         "epochs": 50,
-        "n_layers": 1,
-        "hidden_dim": 16,
+        "n_layers": 3,
+        "hidden_dim": 256,
         "hidden_dim_decay": 0.75,
+        "embedding_dim": 4,
         "out_dim": 1,
         "dropout": 0.4,
         "weight_decay": 1e-3,
         "seed": 87,
         "scheduler_patience": 30,
+        "val_ratio": 0.1,
+        "test_ratio": 0.1,
+        "horizon": 20,
+        "target_col": "target_return_z",
     }
 
     torch.manual_seed(config["seed"])
@@ -41,28 +50,50 @@ def train() -> None:
     # Load dataset
     with open("datasets/subset_tickers.txt", "r") as f:
         tickers = [line.strip() for line in f if line.strip()]
+        f.close()
 
-    df, cols = multiple_ticker.get_feature_target_df(tickers, {"HORIZON": 20})
-    df = df.dropna()
-    X: NDArray[np.float32] = df[[f"{c}_z" for c in cols]].to_numpy()
-    y: NDArray[np.float32] = df["target_return_z"].to_numpy()
-    # %%
-
-    # Load data
-    train_loader, val_loader, test_loader, input_dim = (
-        train_val_test_split_loader(
-            X,
-            y,
-            batch_size=config["batch_size"],
-            val_ratio=0.10,
-            test_ratio=0.10,
-        )
+    df, cols = multiple_ticker.get_feature_target_df(
+        tickers, {"HORIZON": config["horizon"]}
     )
+    df = df.dropna()
+
+    ticker_to_id = {t: i for i, t in enumerate(tickers)}
+    df["ticker_id"] = df["Ticker"].map(ticker_to_id)
+    num_tickers = len(tickers)
+    num_days = df.index.nunique()
+    train_end = df.index[
+        int(num_days * (1 - config["val_ratio"] - config["test_ratio"]))
+        - config["horizon"]
+        - 1
+    ]  # Purging
+    val_start = df.index[
+        int(num_days * (1 - config["val_ratio"] - config["test_ratio"]))
+    ]
+    val_end = df.index[
+        int(num_days * (1 - config["test_ratio"])) - config["horizon"] - 1
+    ]
+    test_start = df.index[int(num_days * (1 - config["test_ratio"]))]
+    train_dataset = TickerEmbeddingDataset(
+        df[df.index <= train_end], cols, config["target_col"]
+    )
+    val_dataset = TickerEmbeddingDataset(
+        df[(df.index >= val_start) & (df.index <= val_end)],
+        cols,
+        config["target_col"],
+    )
+    test_dataset = TickerEmbeddingDataset(
+        df[df.index >= test_start], cols, config["target_col"]
+    )
+    train_loader = DataLoader(train_dataset, config["batch_size"], True)
+    val_loader = DataLoader(val_dataset, config["batch_size"], False)
+    test_loader = DataLoader(test_dataset, config["batch_size"], False)
     # Model, loss, optimizer
 
-    model = MLP(
-        input_dim,
+    model = EmbeddedMLP(
+        len(cols),
         1,
+        config["embedding_dim"],
+        num_tickers,
         params={
             "n_layers": config["n_layers"],
             "hidden_dim": config["hidden_dim"],
@@ -77,7 +108,7 @@ def train() -> None:
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", patience=config["scheduler_patience"], factor=0.5
     )
-    train_full(
+    train_full_with_embedding(
         model,
         train_loader,
         val_loader,

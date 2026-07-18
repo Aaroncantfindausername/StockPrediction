@@ -43,11 +43,11 @@ def train() -> None:
     df = load_dataset(ticker)
     df = preprocess_dataset(df)
 
-    cols, df = single_ticker_lagged.compute_features_and_labels(
+    cols, df = single_ticker_minimal.compute_features_and_labels(
         df, {"HORIZON": 20}
     )
     df = df.dropna()
-    X: NDArray[np.float32] = df[[f"{c}_z" for c in cols]].to_numpy()
+    X: NDArray[np.float32] = df[cols].to_numpy()
     y: NDArray[np.float32] = df["target_return_z"].to_numpy()
     # %%
 
@@ -89,9 +89,10 @@ def train() -> None:
         scheduler,
         device,
         10000,
-        10000,
+        50,
     )
     # Load best weights for final evaluation
     test_loss = evaluate(model, test_loader, criterion, device)
 
     print(f"\nTest Loss: {test_loss:.10f}")
+    torch.save(model, "")

@@ -6,7 +6,7 @@ from train import train_multiple_ticker
 
 if __name__ == "__main__":
     # testing.test()
-    train_multiple_ticker.train()
-    # train()
+    # train_multiple_ticker.train()
+    train()
     # train_eval()
     # backtest("^GSPC")
