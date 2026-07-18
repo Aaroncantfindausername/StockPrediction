@@ -25,14 +25,15 @@ def train() -> None:
         "n_layers": 4,
         "hidden_dim": 256,
         "hidden_dim_decay": 0.5,
-        "out_dim": 1,
+        "out_dim": 2,
         "dropout": 0.3,
         "weight_decay": 1e-3,
         "seed": 87,
         "scheduler_patience": 50,
         "early_stop_patience": 200,
         "horizon": 30,
-        "target": "target_return_sma_z",
+        "target": "target_return_binary",
+        "ticker": "^GSPC",
     }
 
     torch.manual_seed(config["seed"])
@@ -42,7 +43,7 @@ def train() -> None:
     print(f"Using device: {device}")
 
     # Load dataset
-    ticker: str = "^GSPC"
+    ticker: str = config["ticker"]
     df = load_dataset(ticker)
     df = preprocess_dataset(df)
 
@@ -68,7 +69,7 @@ def train() -> None:
 
     model = MLP(
         input_dim,
-        1,
+        config["out_dim"],
         params={
             "n_layers": config["n_layers"],
             "hidden_dim": config["hidden_dim"],
@@ -76,7 +77,7 @@ def train() -> None:
             "dropout_rate": config["dropout"],
         },
     ).to(device)
-    criterion = nn.MSELoss()
+    criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(
         model.parameters(), lr=config["lr"], weight_decay=config["weight_decay"]
     )

@@ -81,9 +81,13 @@ def compute_features_and_labels(
     df["future_close"] = df["Close"].shift(-HORIZON)
     df["target_return"] = (df["future_close"] - df["Close"]) / df["Close"]
     df["target_scaled"] = df["target_return"] / df["atr"]
+    df["target_return_sma"] = talib.SMA(df["target_return"], HORIZON)
+
     for i, col in enumerate(columns):
         df[f"{col}_z"] = rolling_z_score(df[col])
         columns[i] = f"{col}_z"
     df["target_scaled_z"] = rolling_z_score(df["target_scaled"])
     df["target_return_z"] = rolling_z_score(df["target_return"])
+    df["target_return_sma_z"] = rolling_z_score(df["target_return_sma"])
+    df["target_return_binary"] = (df["target_return_z"]).astype(int)
     return columns, df

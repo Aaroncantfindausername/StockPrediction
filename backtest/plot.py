@@ -10,11 +10,6 @@ from models.basic_nn import MLP
 def plot_predictions() -> None:
     config = torch.load("weights/config.pth")
     model = MLP(config["input_dim"], 1, config)
-    torch.manual_seed(config["seed"])
-    np.random.seed(config["seed"])
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
 
     # Load dataset
     ticker: str = "^GSPC"
@@ -22,11 +17,21 @@ def plot_predictions() -> None:
     df = preprocess_dataset(df)
 
     cols, df = single_ticker_minimal.compute_features_and_labels(
-        df, {"HORIZON": 20}
+        df, {"HORIZON": config["horizon"]}
     )
     df = df.dropna()
     X: NDArray[np.float32] = df[cols].to_numpy()
-    outputs = model(torch.tensor(X).to(device)).to("cpu").to_numpy()
+    state_dict = torch.load("weights/model.pth")
+    model.load_state_dict(state_dict)
+    model.eval()
+    with torch.no_grad():
+        outputs = model(torch.tensor(X))
     fig, ax = plt.subplots()
-    ax.plot(outputs, df.index)
+    ax.plot(df.index, outputs, label="Outputs")
+    ax.plot(df.index, df[config["target"]], label="Targets")
+    plt.xlabel("Date")
+    plt.ylabel("Value")
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
     plt.show()
