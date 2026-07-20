@@ -10,7 +10,9 @@ from data.preprocess import load_dataset, preprocess_dataset
 from matplotlib import pyplot as plt
 from train.pipeline import (
     evaluate,
+    evaluate_classification,
     train_full,
+    train_full_classification,
     train_val_test_split_loader,
 )
 from data import single_ticker_lagged, single_ticker_minimal
@@ -22,18 +24,18 @@ def train() -> None:
         "batch_size": 256,
         "lr": 1e-4,
         "epochs": 2000,
-        "n_layers": 4,
-        "hidden_dim": 256,
+        "n_layers": 5,
+        "hidden_dim": 1024,
         "hidden_dim_decay": 0.5,
         "out_dim": 2,
-        "dropout": 0.3,
+        "dropout": 0.5,
         "weight_decay": 1e-3,
         "seed": 87,
         "scheduler_patience": 50,
         "early_stop_patience": 200,
-        "horizon": 30,
+        "horizon": 20,
         "target": "target_return_binary",
-        "ticker": "^GSPC",
+        "ticker": "GOOG",
     }
 
     torch.manual_seed(config["seed"])
@@ -51,6 +53,7 @@ def train() -> None:
         df, {"HORIZON": config["horizon"]}
     )
     df = df.dropna()
+    df["target_return_binary"] = (df["target_return_z"] > 0.0).astype(int)
     X: NDArray[np.float32] = df[cols].to_numpy()
     y: NDArray[np.float32] = df[config["target"]].to_numpy()
     # %%
@@ -84,7 +87,7 @@ def train() -> None:
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", patience=config["scheduler_patience"], factor=0.5
     )
-    train_full(
+    train_full_classification(
         model,
         train_loader,
         val_loader,
@@ -96,7 +99,7 @@ def train() -> None:
         config["early_stop_patience"],
     )
     # Load best weights for final evaluation
-    test_loss = evaluate(model, test_loader, criterion, device)
+    test_loss = evaluate_classification(model, test_loader, criterion, device)
 
     print(f"\nTest Loss: {test_loss:.10f}")
     model_config = {
@@ -107,6 +110,6 @@ def train() -> None:
         "horizon": config["horizon"],
         "target": config["target"],
     }
-    torch.save(model.state_dict(), "weights/model.pth")
-    torch.save(model_config, "weights/config.pth")
+    torch.save(model.state_dict(), "weights/classification_model.pth")
+    torch.save(model_config, "weights/classification_config.pth")
     print("Model weights and config stored")

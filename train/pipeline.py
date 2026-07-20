@@ -27,10 +27,9 @@ def train_val_test_split_loader(
     batch_size: int = 64,
     val_ratio: float = 0.15,
     test_ratio: float = 0.15,
+    shuffle_train: bool = True,
 ) -> Tuple[DataLoader, DataLoader, DataLoader, int]:
     # Split into train+val (70%) and test (30%) first
-    X = X.astype(np.float32)
-    y = y.astype(np.float32)
     X_trainval, X_test, y_trainval, y_test = train_test_split(
         X, y, test_size=test_ratio, shuffle=False
     )
@@ -53,7 +52,7 @@ def train_val_test_split_loader(
 
     # Create DataLoaders
     train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True
+        train_dataset, batch_size=batch_size, shuffle=shuffle_train
     )
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
@@ -241,8 +240,36 @@ def train_epoch_with_embedding(
         running_loss += loss.item() * inputs.size(0)
 
         # print(f"Batch loss: {batch_loss:.4f}")
+    # print(
+    #     f"Epoch train eval: {evaluate_with_embedding(model, loader, criterion, device)}"
+    # )
+    return running_loss / len(loader.dataset)
+
+
+def train_epoch_classification(
+    model: torch.nn.Module,
+    loader: DataLoader[Any],
+    criterion,
+    optimizer,
+    device: str | torch.device,
+) -> float:
+    batch_loss = None
+    model.train()
+    running_loss = 0.0
+    for inputs, targets in loader:
+        inputs, targets = inputs.to(device), targets.to(device)
+        optimizer.zero_grad()
+        outputs = model(inputs)
+        loss = criterion(outputs, targets)
+        batch_loss = loss.item()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+        running_loss += loss.item() * inputs.size(0)
+
+        # print(f"Batch loss: {batch_loss:.4f}")
     print(
-        f"Epoch train eval: {evaluate_with_embedding(model, loader, criterion, device)}"
+        f"Epoch train eval: {evaluate_classification(model, loader, criterion, device)}"
     )
     return running_loss / len(loader.dataset)
 
@@ -295,6 +322,28 @@ def evaluate_with_embedding(
     return avg_loss
 
 
+def evaluate_classification(
+    model: torch.nn.Module,
+    loader: DataLoader[Any],
+    criterion,
+    device: Union[str, torch.device],
+) -> float:
+    model.eval()
+    running_loss: float = 0.0
+    all_preds = []
+    all_targets = []
+    with torch.no_grad():
+        for inputs, targets in loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
+            running_loss += loss.item() * inputs.size(0)
+            all_preds.extend(outputs.cpu().numpy())
+            all_targets.extend(targets.cpu().numpy())
+    avg_loss: float = running_loss / len(loader.dataset)
+    return avg_loss
+
+
 def train_full(
     model: torch.nn.Module,
     train_loader: DataLoader,
@@ -305,6 +354,7 @@ def train_full(
     device: str | torch.device,
     epochs: int,
     patience: int,
+    load_best_val_loss: bool = True,
 ):
     best_val_loss = float("inf")
     best_model_wts = copy.deepcopy(model.state_dict())
@@ -331,10 +381,52 @@ def train_full(
                 f"Validation loss not improved for more than {patience} epochs, early stop triggered"
             )
             break
-    model.load_state_dict(best_model_wts)
+    if load_best_val_loss:
+        model.load_state_dict(best_model_wts)
 
 
 def train_full_with_embedding(
+    model: torch.nn.Module,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    criterion,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.ReduceLROnPlateau,
+    device: str | torch.device,
+    epochs: int,
+    patience: int,
+    load_best_val_loss: bool = True,
+):
+    best_val_loss = float("inf")
+    best_model_wts = copy.deepcopy(model.state_dict())
+    epochs_no_improve = 0
+    for epoch in range(1, epochs + 1):
+        train_loss = train_epoch_with_embedding(
+            model, train_loader, criterion, optimizer, device
+        )
+        val_loss = evaluate_with_embedding(model, val_loader, criterion, device)
+        scheduler.step(val_loss)
+        print(
+            f"Epoch {epoch:2d}/{epochs} | Train Loss: {train_loss:.10f} , Val loss: {val_loss:.10f}, "
+        )
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_model_wts = copy.deepcopy(model.state_dict())
+            epochs_no_improve = 0
+            # torch.save(model.state_dict(), "weights/tmp/best_model.pth")
+        else:
+            epochs_no_improve += 1
+
+        if epochs_no_improve > patience:
+            print(
+                f"Validation loss not improved for more than {patience} epochs, early stop triggered"
+            )
+            break
+    if load_best_val_loss:
+        model.load_state_dict(best_model_wts)
+
+
+def train_full_classification(
     model: torch.nn.Module,
     train_loader: DataLoader,
     val_loader: DataLoader,
@@ -349,10 +441,10 @@ def train_full_with_embedding(
     best_model_wts = copy.deepcopy(model.state_dict())
     epochs_no_improve = 0
     for epoch in range(1, epochs + 1):
-        train_loss = train_epoch_with_embedding(
+        train_loss = train_epoch_classification(
             model, train_loader, criterion, optimizer, device
         )
-        val_loss = evaluate_with_embedding(model, val_loader, criterion, device)
+        val_loss = evaluate_classification(model, val_loader, criterion, device)
         scheduler.step(val_loss)
         print(
             f"Epoch {epoch:2d}/{epochs} | Train Loss: {train_loss:.10f} , Val loss: {val_loss:.10f}, "

@@ -2,6 +2,7 @@ from numpy.typing import NDArray
 from pandas import DatetimeIndex, Timestamp
 import torch
 import torch.nn as nn
+from torch.nn.functional import mse_loss
 import torch.optim as optim
 import numpy as np
 from models.basic_nn import MLP
@@ -20,19 +21,21 @@ def train() -> None:
     # Hyperparameters
     config = {
         "batch_size": 256,
-        "lr": 1e-4,
-        "epochs": 2000,
-        "n_layers": 4,
-        "hidden_dim": 256,
+        "lr": 1e-3,
+        "epochs": 1000,
+        "n_layers": 3,
+        "hidden_dim": 512,
         "hidden_dim_decay": 0.5,
         "out_dim": 1,
-        "dropout": 0.3,
+        "dropout": 0.7,
         "weight_decay": 1e-3,
         "seed": 87,
-        "scheduler_patience": 50,
-        "early_stop_patience": 200,
-        "horizon": 30,
-        "target": "target_return_sma_z",
+        "scheduler_patience": 1000,
+        "early_stop_patience": 200000,
+        "horizon": 20,
+        "target": "target_return_over_atr_z",
+        "ticker": "^GSPC",
+        "shuffle_train": True,
     }
 
     torch.manual_seed(config["seed"])
@@ -42,12 +45,19 @@ def train() -> None:
     print(f"Using device: {device}")
 
     # Load dataset
-    ticker: str = "^GSPC"
+    ticker: str = config["ticker"]
     df = load_dataset(ticker)
     df = preprocess_dataset(df)
 
     cols, df = single_ticker_minimal.compute_features_and_labels(
         df, {"HORIZON": config["horizon"]}
+    )
+    df[f"{config['target']}_mean"] = (
+        df[config["target"]]
+        .shift(config["horizon"])
+        .rolling(252, min_periods=50)
+        .mean()
+        .astype(np.float32)
     )
     df = df.dropna()
     X: NDArray[np.float32] = df[cols].to_numpy()
@@ -62,6 +72,7 @@ def train() -> None:
             batch_size=config["batch_size"],
             val_ratio=0.10,
             test_ratio=0.10,
+            shuffle_train=config["shuffle_train"],
         )
     )
     # Model, loss, optimizer
@@ -76,7 +87,7 @@ def train() -> None:
             "dropout_rate": config["dropout"],
         },
     ).to(device)
-    criterion = nn.MSELoss()
+    criterion = nn.L1Loss()
     optimizer = optim.AdamW(
         model.parameters(), lr=config["lr"], weight_decay=config["weight_decay"]
     )
@@ -93,11 +104,14 @@ def train() -> None:
         device,
         config["epochs"],
         config["early_stop_patience"],
+        load_best_val_loss=False,
     )
     # Load best weights for final evaluation
     test_loss = evaluate(model, test_loader, criterion, device)
-
     print(f"\nTest Loss: {test_loss:.10f}")
+    print(
+        f"Baseline rolling mean prediction: {criterion(torch.tensor(y), torch.tensor(df[f'{config["target"]}_mean'].to_numpy(copy=True)))}"
+    )
     model_config = {
         "input_dim": input_dim,
         "n_layers": config["n_layers"],
@@ -105,6 +119,7 @@ def train() -> None:
         "hidden_dim_decay": config["hidden_dim_decay"],
         "horizon": config["horizon"],
         "target": config["target"],
+        "ticker": config["ticker"],
     }
     torch.save(model.state_dict(), "weights/model.pth")
     torch.save(model_config, "weights/config.pth")

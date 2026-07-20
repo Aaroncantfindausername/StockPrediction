@@ -6,12 +6,12 @@ import torch
 
 
 class Regression(Strategy):
-    predictions_path: str = "Strategy/predictions.pth"
+    predictions_path: str = "strategy/predictions.pth"
     min_buy_threshold: float = 0.002
     close_threshold: float = 0.95
 
     def init(self) -> None:
-        predictions = torch.load(self.predictions_path)
+        predictions = torch.load(self.predictions_path, weights_only=False)
         self.predictions = self.I(lambda: predictions)
 
     def next(self) -> None:

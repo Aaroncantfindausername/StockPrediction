@@ -12,6 +12,7 @@ from matplotlib import pyplot as plt
 from models.embedded_mlp import EmbeddedMLP
 from train.pipeline import (
     evaluate,
+    evaluate_with_embedding,
     train_full,
     train_full_with_embedding,
     train_val_test_split_loader,
@@ -23,22 +24,23 @@ from train.ticker_embedding_dataset import TickerEmbeddingDataset
 def train() -> None:
     # Hyperparameters
     config = {
-        "batch_size": 256,
-        "lr": 1e-4,
-        "epochs": 50,
+        "batch_size": 512,
+        "lr": 5e-3,
+        "epochs": 500,
         "n_layers": 3,
-        "hidden_dim": 256,
-        "hidden_dim_decay": 0.75,
+        "hidden_dim": 64,
+        "hidden_dim_decay": 0.5,
         "embedding_dim": 4,
         "out_dim": 1,
-        "dropout": 0.4,
+        "dropout": 0.5,
         "weight_decay": 1e-3,
         "seed": 87,
-        "scheduler_patience": 30,
+        "scheduler_patience": 10,
+        "early_stop_patience": 20,
         "val_ratio": 0.1,
         "test_ratio": 0.1,
         "horizon": 20,
-        "target_col": "target_return_z",
+        "target": "target_return_z",
     }
 
     torch.manual_seed(config["seed"])
@@ -53,7 +55,7 @@ def train() -> None:
         f.close()
 
     df, cols = multiple_ticker.get_feature_target_df(
-        tickers, {"HORIZON": config["horizon"]}
+        tickers, {"HORIZON": config["horizon"], "lag_features": True}
     )
     df = df.dropna()
 
@@ -74,15 +76,15 @@ def train() -> None:
     ]
     test_start = df.index[int(num_days * (1 - config["test_ratio"]))]
     train_dataset = TickerEmbeddingDataset(
-        df[df.index <= train_end], cols, config["target_col"]
+        df[df.index <= train_end], cols, config["target"]
     )
     val_dataset = TickerEmbeddingDataset(
         df[(df.index >= val_start) & (df.index <= val_end)],
         cols,
-        config["target_col"],
+        config["target"],
     )
     test_dataset = TickerEmbeddingDataset(
-        df[df.index >= test_start], cols, config["target_col"]
+        df[df.index >= test_start], cols, config["target"]
     )
     train_loader = DataLoader(train_dataset, config["batch_size"], True)
     val_loader = DataLoader(val_dataset, config["batch_size"], False)
@@ -116,10 +118,24 @@ def train() -> None:
         optimizer,
         scheduler,
         device,
-        10000,
-        10000,
+        config["epochs"],
+        config["early_stop_patience"],
+        load_best_val_loss=False,
     )
     # Load best weights for final evaluation
-    test_loss = evaluate(model, test_loader, criterion, device)
-
+    test_loss = evaluate_with_embedding(model, test_loader, criterion, device)
     print(f"\nTest Loss: {test_loss:.10f}")
+    model_config = {
+        "input_dim": len(cols),
+        "n_layers": config["n_layers"],
+        "hidden_dim": config["hidden_dim"],
+        "hidden_dim_decay": config["hidden_dim_decay"],
+        "horizon": config["horizon"],
+        "target": config["target"],
+        "ticker_to_id": ticker_to_id,
+        "num_unique_embeddings": num_tickers,
+        "embedding_dim": config["embedding_dim"],
+    }
+    torch.save(model.state_dict(), "weights/embedded_model.pth")
+    torch.save(model_config, "weights/embedded_config.pth")
+    print("Model weights and config stored")
