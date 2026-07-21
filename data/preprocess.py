@@ -35,3 +35,12 @@ def rolling_z_score(series: pd.Series, window=252, min_periods=50) -> pd.Series:
     rolling_std = series.rolling(window, min_periods=min_periods).std()
     z = (series - rolling_mean) / rolling_std
     return z.astype(np.float32)
+
+
+def inverse_rolling_z_score(
+    series: pd.Series, window=252, min_periods=50
+) -> pd.Series:
+    rolling_mean = series.rolling(window, min_periods=min_periods).mean()
+    rolling_std = series.rolling(window, min_periods=min_periods).std()
+    z = series * rolling_std + rolling_mean
+    return z.astype(np.float32)

@@ -24,10 +24,6 @@ def compute_features_and_labels(
         "dist_ema_slow",
         "obv_roc",
         "volume_ratio",
-        "Close",
-        "High",
-        "Low",
-        "Open",
     ]
     # Adding indicators
 
@@ -90,8 +86,8 @@ def compute_features_and_labels(
     df["vol_sma"] = talib.SMA(df["Volume"], timeperiod=volume_sma_t)
     df["volume_ratio"] = df["Volume"] / df["vol_sma"]
     # Calculate forward return
-    df["future_close"] = df["Close"].shift(-HORIZON)
-    df["target_return"] = (df["future_close"] - df["Close"]) / df["Close"]
+    df["close_shifted"] = df["Close"].shift(-HORIZON)
+    df["target_return"] = (df["close_shifted"] - df["Close"]) / df["Close"]
     df["target_scaled"] = df["target_return"] / df["atr"]
     df["forward_return_1d"] = df["Close"].pct_change().shift(-1)
     df["avg_1d_return"] = (
@@ -114,4 +110,6 @@ def compute_features_and_labels(
     df["avg_1d_return_z"] = rolling_z_score(df["avg_1d_return"])
     df["avg+std_1d_return_z"] = rolling_z_score(df["avg+std_1d_return"])
     df["target_return_binary"] = (df["target_return_z"] > 0.0).astype(int)
+    df["target_return_z_clipped"] = df["target_return_z"].clip(-2.5, 2.5)
+    df["close_shifted_z"] = rolling_z_score(df["Close"].shift(-HORIZON))
     return columns, df

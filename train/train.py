@@ -21,20 +21,22 @@ def train() -> None:
     # Hyperparameters
     config = {
         "batch_size": 256,
-        "lr": 1e-3,
+        "lr": 1e-4,
         "epochs": 1000,
         "n_layers": 3,
         "hidden_dim": 512,
         "hidden_dim_decay": 0.5,
         "out_dim": 1,
-        "dropout": 0.7,
+        "dropout": 0.5,
         "weight_decay": 1e-3,
         "seed": 87,
-        "scheduler_patience": 1000,
-        "early_stop_patience": 200000,
-        "horizon": 20,
-        "target": "target_return_over_atr_z",
+        "scheduler_patience": 100,
+        "early_stop_patience": 2000,
+        "horizon": 10,
+        "target": "close_shifted_z",
         "ticker": "^GSPC",
+        "lag_features": True,
+        "lags": [1, 2, 5],
         "shuffle_train": True,
     }
 
@@ -49,8 +51,14 @@ def train() -> None:
     df = load_dataset(ticker)
     df = preprocess_dataset(df)
 
-    cols, df = single_ticker_minimal.compute_features_and_labels(
-        df, {"HORIZON": config["horizon"]}
+    cols, df = (
+        single_ticker_lagged.compute_features_and_labels(
+            df, {"HORIZON": config["horizon"], "lags": config["lags"]}
+        )
+        if config["lag_features"]
+        else single_ticker_minimal.compute_features_and_labels(
+            df, {"HORIZON": config["horizon"]}
+        )
     )
     df[f"{config['target']}_mean"] = (
         df[config["target"]]
@@ -120,6 +128,8 @@ def train() -> None:
         "horizon": config["horizon"],
         "target": config["target"],
         "ticker": config["ticker"],
+        "lag_features": config["lag_features"],
+        "lags": config["lags"],
     }
     torch.save(model.state_dict(), "weights/model.pth")
     torch.save(model_config, "weights/config.pth")

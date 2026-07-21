@@ -10,9 +10,7 @@ from data.preprocess import load_dataset, preprocess_dataset
 from matplotlib import pyplot as plt
 from train.pipeline import (
     evaluate,
-    evaluate_classification,
     train_full,
-    train_full_classification,
     train_val_test_split_loader,
 )
 from data import single_ticker_lagged, single_ticker_minimal

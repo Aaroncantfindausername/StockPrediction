@@ -25,22 +25,25 @@ def train() -> None:
     # Hyperparameters
     config = {
         "batch_size": 512,
-        "lr": 5e-3,
+        "lr": 1e-4,
         "epochs": 500,
-        "n_layers": 3,
-        "hidden_dim": 64,
+        "out_dim": 1,
+        "n_layers": 8,
+        "hidden_dim": 5000,
         "hidden_dim_decay": 0.5,
         "embedding_dim": 4,
-        "out_dim": 1,
-        "dropout": 0.5,
+        "dropout": 0.3,
         "weight_decay": 1e-3,
         "seed": 87,
-        "scheduler_patience": 10,
-        "early_stop_patience": 20,
+        "scheduler_patience": 50,
+        "early_stop_patience": 100,
         "val_ratio": 0.1,
         "test_ratio": 0.1,
-        "horizon": 20,
+        "horizon": 10,
         "target": "target_return_z",
+        "lag_features": True,
+        "lags": [1, 2, 5, 10],
+        "classification": False,
     }
 
     torch.manual_seed(config["seed"])
@@ -55,7 +58,12 @@ def train() -> None:
         f.close()
 
     df, cols = multiple_ticker.get_feature_target_df(
-        tickers, {"HORIZON": config["horizon"], "lag_features": True}
+        tickers,
+        {
+            "HORIZON": config["horizon"],
+            "lag_features": config["lag_features"],
+            "lags": config["lags"],
+        },
     )
     df = df.dropna()
 
@@ -90,10 +98,10 @@ def train() -> None:
     val_loader = DataLoader(val_dataset, config["batch_size"], False)
     test_loader = DataLoader(test_dataset, config["batch_size"], False)
     # Model, loss, optimizer
-
+    out_dim = config["out_dim"] if config["classification"] else 1
     model = EmbeddedMLP(
         len(cols),
-        1,
+        out_dim,
         config["embedding_dim"],
         num_tickers,
         params={
@@ -103,7 +111,9 @@ def train() -> None:
             "dropout_rate": config["dropout"],
         },
     ).to(device)
-    criterion = nn.MSELoss()
+    criterion = (
+        nn.MSELoss() if not config["classification"] else nn.CrossEntropyLoss()
+    )
     optimizer = optim.AdamW(
         model.parameters(), lr=config["lr"], weight_decay=config["weight_decay"]
     )
@@ -121,10 +131,13 @@ def train() -> None:
         config["epochs"],
         config["early_stop_patience"],
         load_best_val_loss=False,
+        classification=config["classification"],
     )
     # Load best weights for final evaluation
-    test_loss = evaluate_with_embedding(model, test_loader, criterion, device)
-    print(f"\nTest Loss: {test_loss:.10f}")
+    test_loss = evaluate_with_embedding(
+        model, test_loader, criterion, device, config["classification"]
+    )
+    print(f"\nTest Loss: {test_loss:.5f}")
     model_config = {
         "input_dim": len(cols),
         "n_layers": config["n_layers"],
@@ -135,6 +148,9 @@ def train() -> None:
         "ticker_to_id": ticker_to_id,
         "num_unique_embeddings": num_tickers,
         "embedding_dim": config["embedding_dim"],
+        "lag_features": config["lag_features"],
+        "classification": config["classification"],
+        "out_dim": config["out_dim"],
     }
     torch.save(model.state_dict(), "weights/embedded_model.pth")
     torch.save(model_config, "weights/embedded_config.pth")

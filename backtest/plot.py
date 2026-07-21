@@ -2,11 +2,16 @@ from numpy.typing import NDArray
 import torch
 import matplotlib.pyplot as plt
 import numpy as np
-from data import multiple_ticker, single_ticker_minimal
-from data.preprocess import load_dataset, preprocess_dataset
+from data import multiple_ticker, single_ticker_lagged, single_ticker_minimal
+from data.preprocess import (
+    inverse_rolling_z_score,
+    load_dataset,
+    preprocess_dataset,
+)
 from models.basic_nn import MLP
 from models.embedded_mlp import EmbeddedMLP
 from train.pipeline import evaluate
+import pandas as pd
 
 
 def plot_predictions() -> None:
@@ -18,10 +23,19 @@ def plot_predictions() -> None:
     df = load_dataset(ticker)
     df = preprocess_dataset(df)
 
-    cols, df = single_ticker_minimal.compute_features_and_labels(
-        df, {"HORIZON": config["horizon"]}
+    cols, df = (
+        single_ticker_minimal.compute_features_and_labels(
+            df, {"HORIZON": config["horizon"]}
+        )
+        if not config["lag_features"]
+        else single_ticker_lagged.compute_features_and_labels(
+            df, {"HORIZON": config["horizon"], "lags": config["lags"]}
+        )
     )
 
+    target = config["target"][:-2]
+    df[f"{target}_std"] = df[target].rolling(252, min_periods=50).std()
+    df[f"{target}_mean"] = df[target].rolling(252, min_periods=50).mean()
     df = df.dropna()
     X: NDArray[np.float32] = df[cols].to_numpy()
     state_dict = torch.load("weights/model.pth")
@@ -29,9 +43,17 @@ def plot_predictions() -> None:
     model.eval()
     with torch.no_grad():
         outputs = model(torch.tensor(X))
+    outputs_unzscored = (
+        pd.Series(outputs.squeeze()) * df[f"{target}_std"]
+        + df[f"{target}_mean"]
+    )
     fig, ax = plt.subplots()
-    ax.plot(df.index, outputs, label="Outputs")
-    ax.plot(df.index, df[config["target"]], label="Targets")
+    ax.plot(
+        df.index,
+        outputs_unzscored,
+        label="Outputs",
+    )
+    ax.plot(df.index, df[config["target"][:-2]], label="Targets")
     plt.xlabel("Date")
     plt.ylabel("Value")
     plt.grid(True)
@@ -45,7 +67,7 @@ def plot_predictions_embd(ticker: str = "^GSPC") -> None:
     config = torch.load("weights/embedded_config.pth")
     model = EmbeddedMLP(
         config["input_dim"],
-        1,
+        1 if not config["classification"] else config["out_dim"],
         config["embedding_dim"],
         config["num_unique_embeddings"],
         config,
@@ -60,7 +82,8 @@ def plot_predictions_embd(ticker: str = "^GSPC") -> None:
     # )
 
     df, cols = multiple_ticker.get_feature_target_df(
-        [ticker], {"HORIZON": config["horizon"]}
+        [ticker],
+        {"HORIZON": config["horizon"], "lag_features": config["lag_features"]},
     )
 
     df = df.dropna()
@@ -73,8 +96,10 @@ def plot_predictions_embd(ticker: str = "^GSPC") -> None:
     with torch.no_grad():
         outputs = model(torch.tensor(X), torch.tensor(df["ticker_id"].values))
     fig, ax = plt.subplots()
-    ax.plot(df.index, outputs, label="Outputs")
-    ax.plot(df.index, df[config["target"]], label="Targets")
+    ax.plot(
+        df.index, inverse_rolling_z_score(pd.Series(outputs)), label="Outputs"
+    )
+    ax.plot(df.index, df[config["target"][:-2]], label="Targets")
     plt.xlabel("Date")
     plt.ylabel("Value")
     plt.grid(True)
