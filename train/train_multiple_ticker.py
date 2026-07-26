@@ -4,13 +4,15 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
+from models.EmbeddedEncoderTransformer import EmbeddedEncoderTransformer
 from models.basic_nn import MLP
 import copy
 from data.preprocess import load_dataset, preprocess_dataset
 from matplotlib import pyplot as plt
 from models.embedded_mlp import EmbeddedMLP
 from train.pipeline import (
+    create_sequential_windows,
     evaluate,
     evaluate_with_embedding,
     train_full,
@@ -25,25 +27,32 @@ def train() -> None:
     # Hyperparameters
     config = {
         "batch_size": 512,
-        "lr": 1e-4,
+        "lr": 1e-3,
         "epochs": 500,
-        "out_dim": 1,
+        "out_dim": 2,
         "n_layers": 8,
-        "hidden_dim": 5000,
+        "hidden_dim": 512,
         "hidden_dim_decay": 0.5,
         "embedding_dim": 4,
-        "dropout": 0.3,
+        "dropout": 0.0,
         "weight_decay": 1e-3,
         "seed": 87,
-        "scheduler_patience": 50,
-        "early_stop_patience": 100,
+        "scheduler_patience": 300,
+        "early_stop_patience": 500,
         "val_ratio": 0.1,
         "test_ratio": 0.1,
-        "horizon": 10,
-        "target": "target_return_z",
-        "lag_features": True,
+        "horizon": 1,
+        "target": "target_return_binary",
+        "lag_features": False,
         "lags": [1, 2, 5, 10],
-        "classification": False,
+        "classification": True,
+        # Transformer config
+        "transformer": True,
+        "seq_len": 50,
+        "d_model": 64,
+        "activation_fn": "relu",
+        "encoder_layers": 4,
+        "n_atten_head": 8,  # Even n.o heads
     }
 
     torch.manual_seed(config["seed"])
@@ -83,34 +92,72 @@ def train() -> None:
         int(num_days * (1 - config["test_ratio"])) - config["horizon"] - 1
     ]
     test_start = df.index[int(num_days * (1 - config["test_ratio"]))]
-    train_dataset = TickerEmbeddingDataset(
-        df[df.index <= train_end], cols, config["target"]
-    )
-    val_dataset = TickerEmbeddingDataset(
-        df[(df.index >= val_start) & (df.index <= val_end)],
-        cols,
-        config["target"],
-    )
-    test_dataset = TickerEmbeddingDataset(
-        df[df.index >= test_start], cols, config["target"]
-    )
+    if config["transformer"]:
+        X_train, ticker_train, y_train = create_sequential_windows(
+            df[df.index <= train_end], cols, config["target"], config["seq_len"]
+        )
+        train_dataset = TensorDataset(X_train, ticker_train, y_train)
+
+        X_val, ticker_val, y_val = create_sequential_windows(
+            df[(df.index >= val_start) & (df.index <= val_end)],
+            cols,
+            config["target"],
+            config["seq_len"],
+        )
+        val_dataset = TensorDataset(X_val, ticker_val, y_val)
+
+        X_test, ticker_test, y_test = create_sequential_windows(
+            df[df.index >= test_start],
+            cols,
+            config["target"],
+            config["seq_len"],
+        )
+        test_dataset = TensorDataset(X_test, ticker_test, y_test)
+    else:
+        train_dataset = TickerEmbeddingDataset(
+            df[df.index <= train_end], cols, config["target"]
+        )
+        val_dataset = TickerEmbeddingDataset(
+            df[(df.index >= val_start) & (df.index <= val_end)],
+            cols,
+            config["target"],
+        )
+        test_dataset = TickerEmbeddingDataset(
+            df[df.index >= test_start], cols, config["target"]
+        )
     train_loader = DataLoader(train_dataset, config["batch_size"], True)
     val_loader = DataLoader(val_dataset, config["batch_size"], False)
     test_loader = DataLoader(test_dataset, config["batch_size"], False)
     # Model, loss, optimizer
     out_dim = config["out_dim"] if config["classification"] else 1
-    model = EmbeddedMLP(
-        len(cols),
-        out_dim,
-        config["embedding_dim"],
-        num_tickers,
-        params={
-            "n_layers": config["n_layers"],
-            "hidden_dim": config["hidden_dim"],
-            "hidden_dim_decay": config["hidden_dim_decay"],
-            "dropout_rate": config["dropout"],
-        },
-    ).to(device)
+    if config["transformer"]:
+        model = EmbeddedEncoderTransformer(
+            len(cols),
+            out_dim,
+            config["d_model"],
+            config["encoder_layers"],
+            config["n_atten_head"],
+            num_tickers,
+            config["embedding_dim"],
+            config["hidden_dim"],
+            config["dropout"],
+            config["activation_fn"],
+            config["seq_len"],
+            device,
+        ).to(device)
+    else:
+        model = EmbeddedMLP(
+            len(cols),
+            out_dim,
+            config["embedding_dim"],
+            num_tickers,
+            params={
+                "n_layers": config["n_layers"],
+                "hidden_dim": config["hidden_dim"],
+                "hidden_dim_decay": config["hidden_dim_decay"],
+                "dropout_rate": config["dropout"],
+            },
+        ).to(device)
     criterion = (
         nn.MSELoss() if not config["classification"] else nn.CrossEntropyLoss()
     )

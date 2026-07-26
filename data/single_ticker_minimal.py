@@ -10,20 +10,25 @@ def compute_features_and_labels(
     df = df.copy()
     HORIZON: int = params.get("HORIZON", 5)
     columns: list[str] = [
-        "roc_slow",
-        "roc_fast",
-        "rsi_slow",
-        "rsi_fast",
-        "macd_hist",
-        "stochk",
-        "stochd",
-        "adx",
-        "pct_b",
-        "atr_norm",
-        "dist_ema_fast",
-        "dist_ema_slow",
-        "obv_roc",
-        "volume_ratio",
+        # "roc_slow",
+        # "roc_fast",
+        # "rsi_slow",
+        # "rsi_fast",
+        # "macd_hist",
+        # "stochk",
+        # "stochd",
+        # "adx",
+        # "pct_b",
+        # "atr_norm",
+        # "dist_ema_fast",
+        # "dist_ema_slow",
+        # "obv_roc",
+        # "volume_ratio",
+        "Close",
+        "Open",
+        "High",
+        "Low",
+        "Volume",
     ]
     # Adding indicators
 
@@ -94,10 +99,12 @@ def compute_features_and_labels(
         df["forward_return_1d"].rolling(HORIZON).mean().shift(-HORIZON + 1)
     )
 
-    df["std_1d_return"] = (
-        df["forward_return_1d"].rolling(HORIZON).std().shift(-HORIZON + 1)
-    )
-    df["avg+std_1d_return"] = df["avg_1d_return"] + 1 * df["std_1d_return"]
+    if HORIZON > 1:
+        df["std_1d_return"] = (
+            df["forward_return_1d"].rolling(HORIZON).std().shift(-HORIZON + 1)
+        )
+        df["avg+std_1d_return"] = df["avg_1d_return"] + 1 * df["std_1d_return"]
+        df["avg+std_1d_return_z"] = rolling_z_score(df["avg+std_1d_return"])
     df["target_return_over_atr"] = df["target_return"] / df["atr"]
     for i, col in enumerate(columns):
         df[f"{col}_z"] = rolling_z_score(df[col])
@@ -108,8 +115,6 @@ def compute_features_and_labels(
         df["target_return_over_atr"]
     )
     df["avg_1d_return_z"] = rolling_z_score(df["avg_1d_return"])
-    df["avg+std_1d_return_z"] = rolling_z_score(df["avg+std_1d_return"])
     df["target_return_binary"] = (df["target_return_z"] > 0.0).astype(int)
     df["target_return_z_clipped"] = df["target_return_z"].clip(-2.5, 2.5)
-    df["close_shifted_z"] = rolling_z_score(df["Close"].shift(-HORIZON))
     return columns, df

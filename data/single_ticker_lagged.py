@@ -17,6 +17,10 @@ def compute_features_and_labels(
         "atr_norm",
         "dist_ema_fast",
         "volume_ratio",
+        "Close",
+        "Open",
+        "High",
+        "Low",
     ]
     cols, df = single_ticker_minimal.compute_features_and_labels(df, params)
     # Lag features

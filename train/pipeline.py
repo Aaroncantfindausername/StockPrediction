@@ -65,6 +65,27 @@ def train_val_test_split_loader(
     )
 
 
+def create_sequential_windows(
+    df, feature_cols: list[str], target_col: list[str], seq_len: int
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    windows = []
+    ticker_ids = []
+    targets = []
+    for ticker_id, group in df.groupby("ticker_id"):
+        features: NDArray[np.float32] = group[feature_cols].values
+        target_vals: NDArray[np.float32] = group[target_col].values
+        for i in range(len(features) - seq_len):
+            X: NDArray[np.float32] = features[i : i + seq_len]
+            y: NDArray[np.float32] = target_vals[i + seq_len]
+            windows.append(X)
+            targets.append(y)
+            ticker_ids.append(ticker_id)
+    X_tensor = torch.tensor(np.array(windows))  # (N, seq_len, num_features)
+    y_tensor = torch.tensor(np.array(targets))  # (N,)
+    ticker_tensor = torch.tensor(np.array(ticker_ids), dtype=torch.long)  # (N,)
+    return X_tensor, ticker_tensor, y_tensor
+
+
 def walk_forward_validation_outer(
     df: DataFrame,
     min_training_years: int,
@@ -201,6 +222,7 @@ def train_epoch(
     batch_loss = None
     model.train()
     running_loss = 0.0
+    running_acc = 0.0
     for inputs, targets in loader:
         inputs = inputs.to(device)
         targets = (
@@ -216,9 +238,13 @@ def train_epoch(
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         running_loss += loss.item() * inputs.size(0)
+        if classification:
+            running_acc += compute_accuracy(outputs, targets) * inputs.size(0)
 
         # print(f"Batch loss: {batch_loss:.4f}")
-    print(f"Epoch train eval: {evaluate(model, loader, criterion, device)}")
+
+    if classification:
+        print(f"Train accuracy: {running_acc / len(loader.dataset):.5f}")
     return running_loss / len(loader.dataset)
 
 
@@ -232,6 +258,7 @@ def train_epoch_with_embedding(
 ) -> float:
     model.train()
     running_loss = 0.0
+    running_acc = 0.0
     for inputs, ticker_ids, targets in loader:
         inputs, ticker_ids, targets = (
             inputs.to(device),
@@ -248,10 +275,10 @@ def train_epoch_with_embedding(
         optimizer.step()
         running_loss += loss.item() * inputs.size(0)
 
-        # print(f"Batch loss: {batch_loss:.4f}")
-    # print(
-    #     f"Epoch train eval: {evaluate_with_embedding(model, loader, criterion, device)}"
-    # )
+        if classification:
+            running_acc += compute_accuracy(outputs, targets) * inputs.size(0)
+    if classification:
+        print(f"Train accuracy: {running_acc / len(loader.dataset):.5f}")
     return running_loss / len(loader.dataset)
 
 
@@ -264,8 +291,7 @@ def evaluate(
 ) -> float:
     model.eval()
     running_loss: float = 0.0
-    all_preds = []
-    all_targets = []
+    running_acc = 0.0
     with torch.no_grad():
         for inputs, targets in loader:
             inputs = inputs.to(device)
@@ -277,8 +303,12 @@ def evaluate(
             outputs = model(inputs)
             loss = criterion(outputs, targets)
             running_loss += loss.item() * inputs.size(0)
-            all_preds.extend(outputs.cpu().numpy())
-            all_targets.extend(targets.cpu().numpy())
+            if classification:
+                running_acc += compute_accuracy(outputs, targets) * inputs.size(
+                    0
+                )
+    if classification:
+        print(f"Epoch eval accuracy: {running_acc / len(loader.dataset)}")
     avg_loss: float = running_loss / len(loader.dataset)
     return avg_loss
 
@@ -292,8 +322,7 @@ def evaluate_with_embedding(
 ) -> float:
     model.eval()
     running_loss: float = 0.0
-    all_preds = []
-    all_targets = []
+    running_acc: float = 0.0
     with torch.no_grad():
         for inputs, ticker_ids, targets in loader:
             inputs, ticker_ids, targets = (
@@ -306,8 +335,12 @@ def evaluate_with_embedding(
             outputs = model(inputs, ticker_ids)
             loss = criterion(outputs, targets)
             running_loss += loss.item() * inputs.size(0)
-            all_preds.extend(outputs.cpu().numpy())
-            all_targets.extend(targets.cpu().numpy())
+            if classification:
+                running_acc += compute_accuracy(outputs, targets) * inputs.size(
+                    0
+                )
+    if classification:
+        print(f"Eval accuracy: {running_acc / len(loader.dataset):.5f}")
     avg_loss: float = running_loss / len(loader.dataset)
     return avg_loss
 
@@ -398,3 +431,10 @@ def train_full_with_embedding(
             break
     if load_best_val_loss:
         model.load_state_dict(best_model_wts)
+
+
+def compute_accuracy(logits: torch.Tensor, targets: torch.Tensor) -> float:
+    preds = torch.argmax(logits, dim=1)
+    correct = (preds == targets).sum().item()
+    total = targets.size(0)
+    return correct / total

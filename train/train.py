@@ -25,19 +25,20 @@ def train() -> None:
         "epochs": 1000,
         "n_layers": 3,
         "hidden_dim": 512,
-        "hidden_dim_decay": 0.5,
-        "out_dim": 1,
+        "hidden_dim_decay": 0.6,
+        "out_dim": 2,
         "dropout": 0.5,
         "weight_decay": 1e-3,
         "seed": 87,
-        "scheduler_patience": 100,
-        "early_stop_patience": 2000,
+        "scheduler_patience": 10,
+        "early_stop_patience": 30,
         "horizon": 10,
-        "target": "close_shifted_z",
+        "target": "target_return_binary",
         "ticker": "^GSPC",
         "lag_features": True,
         "lags": [1, 2, 5],
         "shuffle_train": True,
+        "classification": True,
     }
 
     torch.manual_seed(config["seed"])
@@ -85,9 +86,10 @@ def train() -> None:
     )
     # Model, loss, optimizer
 
+    out_dim = config["out_dim"] if config["classification"] else 1
     model = MLP(
         input_dim,
-        1,
+        out_dim,
         params={
             "n_layers": config["n_layers"],
             "hidden_dim": config["hidden_dim"],
@@ -95,13 +97,16 @@ def train() -> None:
             "dropout_rate": config["dropout"],
         },
     ).to(device)
-    criterion = nn.L1Loss()
+    criterion = (
+        nn.MSELoss() if not config["classification"] else nn.CrossEntropyLoss()
+    )
     optimizer = optim.AdamW(
         model.parameters(), lr=config["lr"], weight_decay=config["weight_decay"]
     )
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", patience=config["scheduler_patience"], factor=0.5
     )
+
     train_full(
         model,
         train_loader,
@@ -113,13 +118,17 @@ def train() -> None:
         config["epochs"],
         config["early_stop_patience"],
         load_best_val_loss=False,
+        classification=config["classification"],
     )
     # Load best weights for final evaluation
-    test_loss = evaluate(model, test_loader, criterion, device)
-    print(f"\nTest Loss: {test_loss:.10f}")
-    print(
-        f"Baseline rolling mean prediction: {criterion(torch.tensor(y), torch.tensor(df[f'{config["target"]}_mean'].to_numpy(copy=True)))}"
+    test_loss = evaluate(
+        model, test_loader, criterion, device, config["classification"]
     )
+    print(f"\nTest Loss: {test_loss:.5f}")
+    if not config["classification"]:
+        print(
+            f"Baseline rolling mean prediction: {criterion(torch.tensor(y), torch.tensor(df[f'{config["target"]}_mean'].to_numpy(copy=True)))}"
+        )
     model_config = {
         "input_dim": input_dim,
         "n_layers": config["n_layers"],
@@ -130,6 +139,7 @@ def train() -> None:
         "ticker": config["ticker"],
         "lag_features": config["lag_features"],
         "lags": config["lags"],
+        "classification": config["classification"],
     }
     torch.save(model.state_dict(), "weights/model.pth")
     torch.save(model_config, "weights/config.pth")

@@ -7,10 +7,10 @@ from train import train_multiple_ticker
 
 if __name__ == "__main__":
     # testing.test()
-    # train_multiple_ticker.train()
+    train_multiple_ticker.train()
     # train()
     # train_eval()
     # precompute_outputs()
     # backtest("GOOG")
-    plot_predictions()
-    # plot_predictions_embd("GOOGL")
+    # plot_predictions(True)
+    plot_predictions_embd("GOOGL")

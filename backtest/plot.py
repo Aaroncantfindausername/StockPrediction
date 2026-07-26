@@ -14,9 +14,13 @@ from train.pipeline import evaluate
 import pandas as pd
 
 
-def plot_predictions() -> None:
+def plot_predictions(unzscore: bool = False) -> None:
     config = torch.load("weights/config.pth")
-    model = MLP(config["input_dim"], 1, config)
+    model = MLP(
+        config["input_dim"],
+        1 if not config["classification"] else config["out_dim"],
+        config,
+    )
 
     # Load dataset
     ticker: str = config.get("ticker")
@@ -32,7 +36,6 @@ def plot_predictions() -> None:
             df, {"HORIZON": config["horizon"], "lags": config["lags"]}
         )
     )
-
     target = config["target"][:-2]
     df[f"{target}_std"] = df[target].rolling(252, min_periods=50).std()
     df[f"{target}_mean"] = df[target].rolling(252, min_periods=50).mean()
@@ -43,17 +46,22 @@ def plot_predictions() -> None:
     model.eval()
     with torch.no_grad():
         outputs = model(torch.tensor(X))
-    outputs_unzscored = (
-        pd.Series(outputs.squeeze()) * df[f"{target}_std"]
-        + df[f"{target}_mean"]
-    )
+    outputs_z = pd.Series(outputs.squeeze(), index=df.index)
+    outputs_unzscored = outputs_z * df[f"{target}_std"] + df[f"{target}_mean"]
+
+    if unzscore:
+        line1 = outputs_unzscored
+        line2 = df[config["target"][:-2]]
+    else:
+        line1 = outputs_z
+        line2 = df[config["target"]]
     fig, ax = plt.subplots()
     ax.plot(
         df.index,
-        outputs_unzscored,
+        line1,
         label="Outputs",
     )
-    ax.plot(df.index, df[config["target"][:-2]], label="Targets")
+    ax.plot(df.index, line2, label="Targets")
     plt.xlabel("Date")
     plt.ylabel("Value")
     plt.grid(True)

@@ -1,9 +1,13 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import os
 
 
 def download_dataset(ticker: str) -> None:
+    if os.path.exists(f"datasets/{ticker}.csv"):
+        print(f"{ticker}.csv already exists skipping")
+        return
     data = yf.download(ticker, start="2000-01-01", end="2025-12-31")
     if data is None:
         raise ValueError("Failed to download dataset")
