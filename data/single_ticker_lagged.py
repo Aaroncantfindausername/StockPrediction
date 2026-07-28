@@ -10,18 +10,7 @@ from data.preprocess import rolling_z_score
 def compute_features_and_labels(
     df: pd.DataFrame, params: Dict[str, Any] = {}
 ) -> Tuple[list[str], pd.DataFrame]:
-    lagged_features = [
-        "rsi_fast",
-        "macd_hist",
-        "pct_b",
-        "atr_norm",
-        "dist_ema_fast",
-        "volume_ratio",
-        "Close",
-        "Open",
-        "High",
-        "Low",
-    ]
+    lagged_features = params.get("lagged_features", params["columns"])
     cols, df = single_ticker_minimal.compute_features_and_labels(df, params)
     # Lag features
     lags = params.get("lags", [1, 2, 3, 5])

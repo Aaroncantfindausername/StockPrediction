@@ -4,17 +4,18 @@ import torch
 import torch.nn as nn
 
 
-class EmbeddedMLP(nn.Module):
+class MLP(nn.Module):
     """
-    A simple multi-layer perceptron.
+    A multi-layer perceptron with an optional embedding for multiple tickers.
     """
 
     def __init__(
         self,
         feature_dim: int,
         out_dim: int,
-        embedding_dim: int,
-        num_unique_embeddings: int,
+        has_embedding: bool = False,
+        embedding_dim: int = 0,
+        num_unique_embeddings: int = 0,
         params: Dict[str, Any] = {},
     ):
         hidden_dim: int = params.get("hidden_dim", 256)
@@ -23,6 +24,7 @@ class EmbeddedMLP(nn.Module):
         n_layers: int = params.get("n_layers", 3)
         activation_str = params.get("activation", "relu")
         act_params = params.get("activation_params", [])
+        self.has_embedding = has_embedding
         match activation_str:
             case "relu":
                 activation_type = nn.ReLU
@@ -51,9 +53,15 @@ class EmbeddedMLP(nn.Module):
             prev_dim = hidden_out_dim
         layers.append(nn.Linear(prev_dim, out_dim))
         self.net = nn.Sequential(*layers)
-        self.embedding = nn.Embedding(num_unique_embeddings, embedding_dim)
+        if self.has_embedding:
+            self.embedding = nn.Embedding(num_unique_embeddings, embedding_dim)
 
-    def forward(self, features: torch.Tensor, ticker_ids: torch.Tensor):
-        emb: torch.Tensor = self.embedding(ticker_ids)
-        x = torch.concat([features, emb], dim=1)
+    def forward(
+        self, features: torch.Tensor, ticker_ids: torch.Tensor | None = None
+    ):
+        if self.has_embedding:
+            emb: torch.Tensor = self.embedding(ticker_ids)
+            x = torch.concat([features, emb], dim=1)
+        else:
+            x = features
         return self.net(x)

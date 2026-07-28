@@ -2,6 +2,7 @@ from typing import Any, Dict, Tuple
 import talib
 import pandas as pd
 from data.preprocess import rolling_z_score
+import numpy as np
 
 
 def compute_features_and_labels(
@@ -9,27 +10,8 @@ def compute_features_and_labels(
 ) -> Tuple[list[str], pd.DataFrame]:
     df = df.copy()
     HORIZON: int = params.get("HORIZON", 5)
-    columns: list[str] = [
-        # "roc_slow",
-        # "roc_fast",
-        # "rsi_slow",
-        # "rsi_fast",
-        # "macd_hist",
-        # "stochk",
-        # "stochd",
-        # "adx",
-        # "pct_b",
-        # "atr_norm",
-        # "dist_ema_fast",
-        # "dist_ema_slow",
-        # "obv_roc",
-        # "volume_ratio",
-        "Close",
-        "Open",
-        "High",
-        "Low",
-        "Volume",
-    ]
+    columns = params.get("columns", ["Close", "Open", "High", "Low", "Volume"])
+    columns_z = columns.copy()
     # Adding indicators
 
     roc_fast_t = params.get("roc_fast_t", 5)
@@ -108,7 +90,7 @@ def compute_features_and_labels(
     df["target_return_over_atr"] = df["target_return"] / df["atr"]
     for i, col in enumerate(columns):
         df[f"{col}_z"] = rolling_z_score(df[col])
-        columns[i] = f"{col}_z"
+        columns_z[i] = f"{col}_z"
     df["target_scaled_z"] = rolling_z_score(df["target_scaled"])
     df["target_return_z"] = rolling_z_score(df["target_return"])
     df["target_return_over_atr_z"] = rolling_z_score(
@@ -116,5 +98,11 @@ def compute_features_and_labels(
     )
     df["avg_1d_return_z"] = rolling_z_score(df["avg_1d_return"])
     df["target_return_binary"] = (df["target_return_z"] > 0.0).astype(int)
+    threshold = params.get("3class_threshold", 0.5)
+    df["target_return_3_class"] = pd.cut(
+        df["target_return_z"],
+        bins=[-np.inf, -threshold, threshold, np.inf],
+        labels=[0, 1, 2],
+    )
     df["target_return_z_clipped"] = df["target_return_z"].clip(-2.5, 2.5)
-    return columns, df
+    return columns_z, df

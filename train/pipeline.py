@@ -65,8 +65,8 @@ def train_val_test_split_loader(
     )
 
 
-def create_sequential_windows(
-    df, feature_cols: list[str], target_col: list[str], seq_len: int
+def create_sequential_windows_multiple_tickers(
+    df: DataFrame, feature_cols: list[str], target_col: list[str], seq_len: int
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     windows = []
     ticker_ids = []
@@ -74,9 +74,9 @@ def create_sequential_windows(
     for ticker_id, group in df.groupby("ticker_id"):
         features: NDArray[np.float32] = group[feature_cols].values
         target_vals: NDArray[np.float32] = group[target_col].values
-        for i in range(len(features) - seq_len):
+        for i in range(len(features) - seq_len + 1):
             X: NDArray[np.float32] = features[i : i + seq_len]
-            y: NDArray[np.float32] = target_vals[i + seq_len]
+            y: NDArray[np.float32] = target_vals[i + seq_len - 1]
             windows.append(X)
             targets.append(y)
             ticker_ids.append(ticker_id)
@@ -84,6 +84,23 @@ def create_sequential_windows(
     y_tensor = torch.tensor(np.array(targets))  # (N,)
     ticker_tensor = torch.tensor(np.array(ticker_ids), dtype=torch.long)  # (N,)
     return X_tensor, ticker_tensor, y_tensor
+
+
+def create_sequential_windows_single_tickers(
+    df, feature_cols: list[str], target_col: list[str], seq_len: int
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    windows = []
+    targets = []
+    features: NDArray[np.float32] = df[feature_cols].values
+    target_vals: NDArray[np.float32] = df[target_col].values
+    for i in range(len(features) - seq_len):
+        X: NDArray[np.float32] = features[i : i + seq_len]
+        y: NDArray[np.float32] = target_vals[i + seq_len]
+        windows.append(X)
+        targets.append(y)
+    X_tensor = torch.tensor(np.array(windows))  # (N, seq_len, num_features)
+    y_tensor = torch.tensor(np.array(targets))  # (N,)
+    return X_tensor, y_tensor
 
 
 def walk_forward_validation_outer(
@@ -369,6 +386,7 @@ def train_full(
             model, val_loader, criterion, device, classification
         )
         scheduler.step(val_loss)
+        # print(f"Epoch {epoch}: LR = {optimizer.param_groups[0]['lr']:.10f}")
         print(
             f"Epoch {epoch:2d}/{epochs} | Train Loss: {train_loss:.10f} , Val loss: {val_loss:.10f}, "
         )
@@ -413,6 +431,7 @@ def train_full_with_embedding(
             model, val_loader, criterion, device, classification
         )
         scheduler.step(val_loss)
+        # print(f"Epoch {epoch}: LR = {optimizer.param_groups[0]['lr']:.10f}")
         print(
             f"Epoch {epoch:2d}/{epochs} | Train Loss: {train_loss:.10f} , Val loss: {val_loss:.10f}, "
         )

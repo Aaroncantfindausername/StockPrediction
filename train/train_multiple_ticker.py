@@ -5,14 +5,13 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
-from models.EmbeddedEncoderTransformer import EmbeddedEncoderTransformer
-from models.basic_nn import MLP
+from models.EncoderTransformer import EncoderTransformer
 import copy
 from data.preprocess import load_dataset, preprocess_dataset
 from matplotlib import pyplot as plt
-from models.embedded_mlp import EmbeddedMLP
+from models.mlp import MLP
 from train.pipeline import (
-    create_sequential_windows,
+    create_sequential_windows_multiple_tickers,
     evaluate,
     evaluate_with_embedding,
     train_full,
@@ -25,30 +24,52 @@ from train.ticker_embedding_dataset import TickerEmbeddingDataset
 
 def train() -> None:
     # Hyperparameters
+    features: list[str] = [
+        # "roc_slow",
+        # "roc_fast",
+        # "rsi_slow",
+        # "rsi_fast",
+        # "macd_hist",
+        # "stochk",
+        # "stochd",
+        # "adx",
+        # "pct_b",
+        # "atr_norm",
+        # "dist_ema_fast",
+        # "dist_ema_slow",
+        # "obv_roc",
+        # "volume_ratio",
+        "Close",
+        # "Open",
+        # "High",
+        # "Low",
+        # "Volume",
+    ]
     config = {
-        "batch_size": 512,
-        "lr": 1e-3,
+        "batch_size": 2048,
+        "lr": 1e-5,
         "epochs": 500,
-        "out_dim": 2,
+        "out_dim": 3,
         "n_layers": 8,
         "hidden_dim": 512,
         "hidden_dim_decay": 0.5,
         "embedding_dim": 4,
-        "dropout": 0.0,
+        "dropout": 0.3,
         "weight_decay": 1e-3,
-        "seed": 87,
-        "scheduler_patience": 300,
-        "early_stop_patience": 500,
-        "val_ratio": 0.1,
+        "seed": 67,
+        "scheduler_patience": 2,
+        "early_stop_patience": 5,
+        "val_ratio": 0.2,
         "test_ratio": 0.1,
-        "horizon": 1,
-        "target": "target_return_binary",
+        "columns": features,
+        "horizon": 10,
+        "target": "target_return_3_class",
         "lag_features": False,
         "lags": [1, 2, 5, 10],
         "classification": True,
         # Transformer config
         "transformer": True,
-        "seq_len": 50,
+        "seq_len": 1,
         "d_model": 64,
         "activation_fn": "relu",
         "encoder_layers": 4,
@@ -72,6 +93,7 @@ def train() -> None:
             "HORIZON": config["horizon"],
             "lag_features": config["lag_features"],
             "lags": config["lags"],
+            "columns": config["columns"],
         },
     )
     df = df.dropna()
@@ -93,12 +115,17 @@ def train() -> None:
     ]
     test_start = df.index[int(num_days * (1 - config["test_ratio"]))]
     if config["transformer"]:
-        X_train, ticker_train, y_train = create_sequential_windows(
-            df[df.index <= train_end], cols, config["target"], config["seq_len"]
+        X_train, ticker_train, y_train = (
+            create_sequential_windows_multiple_tickers(
+                df[df.index <= train_end],
+                cols,
+                config["target"],
+                config["seq_len"],
+            )
         )
         train_dataset = TensorDataset(X_train, ticker_train, y_train)
 
-        X_val, ticker_val, y_val = create_sequential_windows(
+        X_val, ticker_val, y_val = create_sequential_windows_multiple_tickers(
             df[(df.index >= val_start) & (df.index <= val_end)],
             cols,
             config["target"],
@@ -106,11 +133,13 @@ def train() -> None:
         )
         val_dataset = TensorDataset(X_val, ticker_val, y_val)
 
-        X_test, ticker_test, y_test = create_sequential_windows(
-            df[df.index >= test_start],
-            cols,
-            config["target"],
-            config["seq_len"],
+        X_test, ticker_test, y_test = (
+            create_sequential_windows_multiple_tickers(
+                df[df.index >= test_start],
+                cols,
+                config["target"],
+                config["seq_len"],
+            )
         )
         test_dataset = TensorDataset(X_test, ticker_test, y_test)
     else:
@@ -131,13 +160,14 @@ def train() -> None:
     # Model, loss, optimizer
     out_dim = config["out_dim"] if config["classification"] else 1
     if config["transformer"]:
-        model = EmbeddedEncoderTransformer(
+        model = EncoderTransformer(
             len(cols),
             out_dim,
             config["d_model"],
             config["encoder_layers"],
             config["n_atten_head"],
             num_tickers,
+            True,
             config["embedding_dim"],
             config["hidden_dim"],
             config["dropout"],
@@ -146,9 +176,10 @@ def train() -> None:
             device,
         ).to(device)
     else:
-        model = EmbeddedMLP(
+        model = MLP(
             len(cols),
             out_dim,
+            True,
             config["embedding_dim"],
             num_tickers,
             params={
@@ -165,8 +196,17 @@ def train() -> None:
         model.parameters(), lr=config["lr"], weight_decay=config["weight_decay"]
     )
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", patience=config["scheduler_patience"], factor=0.5
+        optimizer,
+        mode="min",
+        patience=config["scheduler_patience"],
+        factor=0.5,
+        threshold=0.0,
     )
+
+    val_loss_baseline = evaluate_with_embedding(
+        model, val_loader, criterion, device, config["classification"]
+    )
+    print(f"^^^ Random model accuracy; val loss = {val_loss_baseline}")
     train_full_with_embedding(
         model,
         train_loader,
@@ -193,11 +233,19 @@ def train() -> None:
         "horizon": config["horizon"],
         "target": config["target"],
         "ticker_to_id": ticker_to_id,
+        "columns": config["columns"],
         "num_unique_embeddings": num_tickers,
         "embedding_dim": config["embedding_dim"],
         "lag_features": config["lag_features"],
         "classification": config["classification"],
         "out_dim": config["out_dim"],
+        "transformer": config["transformer"],
+        "seq_len": config["seq_len"],
+        "d_model": config["d_model"],
+        "activation_fn": config["activation_fn"],
+        "encoder_layers": config["encoder_layers"],
+        "n_atten_head": config["n_atten_head"],
+        "val_start": val_start,
     }
     torch.save(model.state_dict(), "weights/embedded_model.pth")
     torch.save(model_config, "weights/embedded_config.pth")

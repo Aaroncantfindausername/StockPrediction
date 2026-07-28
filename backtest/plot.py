@@ -8,9 +8,9 @@ from data.preprocess import (
     load_dataset,
     preprocess_dataset,
 )
-from models.basic_nn import MLP
-from models.embedded_mlp import EmbeddedMLP
-from train.pipeline import evaluate
+from models.EncoderTransformer import EncoderTransformer
+from models.mlp import MLP
+from train.pipeline import create_sequential_windows_multiple_tickers, evaluate
 import pandas as pd
 
 
@@ -29,11 +29,16 @@ def plot_predictions(unzscore: bool = False) -> None:
 
     cols, df = (
         single_ticker_minimal.compute_features_and_labels(
-            df, {"HORIZON": config["horizon"]}
+            df, {"HORIZON": config["horizon"], "columns": config["columns"]}
         )
         if not config["lag_features"]
         else single_ticker_lagged.compute_features_and_labels(
-            df, {"HORIZON": config["horizon"], "lags": config["lags"]}
+            df,
+            {
+                "HORIZON": config["horizon"],
+                "lags": config["lags"],
+                "columns": config["columns"],
+            },
         )
     )
     target = config["target"][:-2]
@@ -72,14 +77,33 @@ def plot_predictions(unzscore: bool = False) -> None:
 
 
 def plot_predictions_embd(ticker: str = "^GSPC") -> None:
+    device = "cpu"
     config = torch.load("weights/embedded_config.pth")
-    model = EmbeddedMLP(
-        config["input_dim"],
-        1 if not config["classification"] else config["out_dim"],
-        config["embedding_dim"],
-        config["num_unique_embeddings"],
-        config,
-    )
+    out_dim = config["out_dim"] if config["classification"] else 1
+    if config["transformer"]:
+        model = EncoderTransformer(
+            config["input_dim"],
+            out_dim,
+            config["d_model"],
+            config["encoder_layers"],
+            config["n_atten_head"],
+            config["num_unique_embeddings"],
+            True,
+            config["embedding_dim"],
+            config["hidden_dim"],
+            0.0,
+            config["activation_fn"],
+            config["seq_len"],
+            device,
+        ).to(device)
+    else:
+        model = MLP(
+            config["input_dim"],
+            1 if not config["classification"] else config["out_dim"],
+            config["embedding_dim"],
+            config["num_unique_embeddings"],
+            config,
+        )
 
     # with open("datasets/subset_tickers.txt", "r") as f:
     #     tickers = [line.strip() for line in f if line.strip()]
@@ -91,23 +115,51 @@ def plot_predictions_embd(ticker: str = "^GSPC") -> None:
 
     df, cols = multiple_ticker.get_feature_target_df(
         [ticker],
-        {"HORIZON": config["horizon"], "lag_features": config["lag_features"]},
+        {
+            "HORIZON": config["horizon"],
+            "lag_features": config["lag_features"],
+            "columns": config["columns"],
+        },
     )
 
+    df["ticker_id"] = df["Ticker"].map(config["ticker_to_id"])
     df = df.dropna()
-    X: NDArray[np.float32] = df[cols].to_numpy()
-    ticker_to_id = config["ticker_to_id"]
-    df["ticker_id"] = df["Ticker"].map(ticker_to_id)
+    if config["transformer"]:
+        X_tensor, ticker_tensor, y_tensor = (
+            create_sequential_windows_multiple_tickers(
+                df,
+                cols,
+                config["target"],
+                config["seq_len"],
+            )
+        )
+        X_tensor = X_tensor.to(device)
+        y_tensor = y_tensor.to(device)
+        ticker_tensor = ticker_tensor.to(device)
+
+    else:
+        X: NDArray[np.float32] = df[cols].to_numpy()
+        X_tensor = torch.tensor(X, device=device)
+        ticker_to_id = config["ticker_to_id"]
+        df["ticker_id"] = df["Ticker"].map(ticker_to_id)
+        ticker_tensor = (torch.tensor(df["ticker_id"].values, device=device),)
     state_dict = torch.load("weights/embedded_model.pth")
     model.load_state_dict(state_dict)
     model.eval()
     with torch.no_grad():
-        outputs = model(torch.tensor(X), torch.tensor(df["ticker_id"].values))
+        outputs = model(
+            X_tensor,
+            ticker_tensor,
+        )
     fig, ax = plt.subplots()
-    ax.plot(
-        df.index, inverse_rolling_z_score(pd.Series(outputs)), label="Outputs"
-    )
-    ax.plot(df.index, df[config["target"][:-2]], label="Targets")
+    ax.plot(df.index, outputs.detach().cpu().numpy(), label="Outputs")
+    ax.plot(df.index, df[config["target"]], label="Targets")
+    for i in range(len(config["columns"])):
+        ax.plot(
+            df.index,
+            df[f"{config['columns'][i]}_z"],
+            label=config["columns"][i],
+        )
     plt.xlabel("Date")
     plt.ylabel("Value")
     plt.grid(True)
