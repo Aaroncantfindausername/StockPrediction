@@ -76,9 +76,11 @@ def plot_predictions(unzscore: bool = False) -> None:
     plt.savefig("plots/fig")
 
 
-def plot_predictions_embd(ticker: str = "^GSPC") -> None:
+def plot_predictions_embd(
+    ticker: str = "^GSPC", plot_features: bool = False
+) -> None:
     device = "cpu"
-    config = torch.load("weights/embedded_config.pth")
+    config = torch.load("weights/embedded_config.pth", weights_only=False)
     out_dim = config["out_dim"] if config["classification"] else 1
     if config["transformer"]:
         model = EncoderTransformer(
@@ -136,7 +138,8 @@ def plot_predictions_embd(ticker: str = "^GSPC") -> None:
         X_tensor = X_tensor.to(device)
         y_tensor = y_tensor.to(device)
         ticker_tensor = ticker_tensor.to(device)
-
+        if config["seq_len"] > 1:
+            df = df.iloc[: -config["seq_len"] + 1]
     else:
         X: NDArray[np.float32] = df[cols].to_numpy()
         X_tensor = torch.tensor(X, device=device)
@@ -154,12 +157,13 @@ def plot_predictions_embd(ticker: str = "^GSPC") -> None:
     fig, ax = plt.subplots()
     ax.plot(df.index, outputs.detach().cpu().numpy(), label="Outputs")
     ax.plot(df.index, df[config["target"]], label="Targets")
-    for i in range(len(config["columns"])):
-        ax.plot(
-            df.index,
-            df[f"{config['columns'][i]}_z"],
-            label=config["columns"][i],
-        )
+    if plot_features:
+        for i in range(len(config["columns"])):
+            ax.plot(
+                df.index,
+                df[f"{config['columns'][i]}_z"],
+                label=config["columns"][i],
+            )
     plt.xlabel("Date")
     plt.ylabel("Value")
     plt.grid(True)

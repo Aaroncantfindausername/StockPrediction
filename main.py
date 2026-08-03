@@ -6,11 +6,11 @@ from train import testing
 from train import train_multiple_ticker
 
 if __name__ == "__main__":
-    # testing.test()
+    testing.test()
     # train_multiple_ticker.train()
     # train()
     # train_eval()
-    # precompute_outputs()
-    backtest("GOOGL")
+    # precompute_outputs("GOOGL")
+    # backtest("GOOGL")
     # plot_predictions(True)
     # plot_predictions_embd("GOOGL")

@@ -66,6 +66,13 @@ def compute_features_and_labels(
     df["ema_slow"] = talib.EMA(df["Close"], timeperiod=ema_slow_t)
     df["dist_ema_fast"] = (df["Close"] - df["ema_fast"]) / df["ema_fast"]
     df["dist_ema_slow"] = (df["Close"] - df["ema_slow"]) / df["ema_slow"]
+
+    sma_fast_t = params.get("sma_fast_t", 50)
+    sma_slow_t = params.get("sma_slow_t", 200)
+    df["sma_fast"] = talib.SMA(df["Close"], timeperiod=sma_fast_t)
+    df["sma_slow"] = talib.SMA(df["Close"], timeperiod=sma_slow_t)
+    df["dist_sma_fast"] = (df["Close"] - df["sma_fast"]) / df["sma_fast"]
+    df["dist_sma_slow"] = (df["Close"] - df["sma_slow"]) / df["sma_slow"]
     obv_roc_t = params.get("obv_roc_t", 5)
     df["obv"] = talib.OBV(df["Close"], df["Volume"])
     df["obv_roc"] = talib.ROC(df["obv"], timeperiod=obv_roc_t)
@@ -87,22 +94,51 @@ def compute_features_and_labels(
         )
         df["avg+std_1d_return"] = df["avg_1d_return"] + 1 * df["std_1d_return"]
         df["avg+std_1d_return_z"] = rolling_z_score(df["avg+std_1d_return"])
+        cumulative_returns_list = []
+        for i in range(1, HORIZON + 1):
+            cumulative_returns_list.append(
+                df["Close"].pct_change(i).shift(-i) / i
+            )
+
+        df["avg_cumulative_daily_return"] = pd.concat(
+            cumulative_returns_list, axis=1
+        ).mean(axis=1)
+
+        df["std_cumulative_daily_return"] = pd.concat(
+            cumulative_returns_list, axis=1
+        ).std(axis=1)
+
+        df["avg+std_cumulative_daily_return"] = (
+            df["avg_cumulative_daily_return"]
+            + df["std_cumulative_daily_return"]
+        )
+
+        df["avg_cumulative_daily_return_z"] = rolling_z_score(
+            df["avg_cumulative_daily_return"]
+        )
+        df["avg+std_cumulative_daily_return_z"] = rolling_z_score(
+            df["avg+std_cumulative_daily_return"]
+        )
     df["target_return_over_atr"] = df["target_return"] / df["atr"]
     for i, col in enumerate(columns):
-        df[f"{col}_z"] = rolling_z_score(df[col])
+        df[f"{col}_z"] = rolling_z_score(
+            df[col], params.get("feature_z_score_window", 252)
+        )
         columns_z[i] = f"{col}_z"
     df["target_scaled_z"] = rolling_z_score(df["target_scaled"])
+    df["dist_ema_fast_z"] = rolling_z_score(df["dist_ema_fast"])
     df["target_return_z"] = rolling_z_score(df["target_return"])
     df["target_return_over_atr_z"] = rolling_z_score(
         df["target_return_over_atr"]
     )
     df["avg_1d_return_z"] = rolling_z_score(df["avg_1d_return"])
     df["target_return_binary"] = (df["target_return_z"] > 0.0).astype(int)
-    threshold = params.get("3class_threshold", 0.5)
-    df["target_return_3_class"] = pd.cut(
+    df["target_return_pos_neg"] = (df["target_return"] > 0.0).astype(int)
+    threshold = params.get("class_threshold", 0.3)
+    df["target_return_classes"] = pd.cut(
         df["target_return_z"],
-        bins=[-np.inf, -threshold, threshold, np.inf],
-        labels=[0, 1, 2],
+        bins=[-np.inf, -threshold, 0, threshold, np.inf],
+        labels=[0, 1, 2, 3],
     )
     df["target_return_z_clipped"] = df["target_return_z"].clip(-2.5, 2.5)
     return columns_z, df

@@ -6,9 +6,9 @@ import torch
 
 
 class Regression(Strategy):
-    predictions_path: str = "strategy/predictions.pth"
-    min_buy_threshold: float = 0.002
-    close_threshold: float = 0.95
+    predictions_path: str = "backtest/predictions.pth"
+    min_buy_threshold: float = 0.0
+    close_threshold: float = -0.2
 
     def init(self) -> None:
         predictions = torch.load(self.predictions_path, weights_only=False)
@@ -19,9 +19,15 @@ class Regression(Strategy):
             # Some features still NaN
             return
         if self.predictions[-1] > self.min_buy_threshold:
-            self.buy(size=min(self.predictions[-1] * 50, 1))
+            self.buy(
+                size=min(self.predictions[-1], 1),
+                sl=self.data.Close[-1] * 0.80,
+            )
             print(
-                f"Attempting buy, predicted returns: {self.predictions[-1]}\n Size = {self.predictions[-1] * 50}"
+                f"Attempting buy, predicted returns: {self.predictions[-1]}\n Size = {min(max(self.predictions[-1], 0.05), 1)}"
             )
         elif self.predictions[-1] < self.close_threshold:
+            print(
+                f"Closing positions, predicted returns {self.predictions[-1]}"
+            )
             self.position.close()

@@ -29,16 +29,19 @@ def train() -> None:
         # "roc_fast",
         # "rsi_slow",
         # "rsi_fast",
-        # "macd_hist",
+        # # "macd_hist",
         # "stochk",
-        # "stochd",
+        # # "stochd",
         # "adx",
-        # "pct_b",
-        # "atr_norm",
+        # # "pct_b",
+        # # "atr_norm",
         # "dist_ema_fast",
         # "dist_ema_slow",
-        # "obv_roc",
+        # "dist_sma_fast",
+        # "dist_sma_slow",
+        # # "obv_roc",
         # "volume_ratio",
+        # "ema_slow",
         "Close",
         # "Open",
         # "High",
@@ -47,33 +50,35 @@ def train() -> None:
     ]
     config = {
         "batch_size": 2048,
-        "lr": 1e-5,
+        "lr": 1e-4,
         "epochs": 500,
-        "out_dim": 3,
-        "n_layers": 8,
-        "hidden_dim": 512,
+        "out_dim": 2,
+        "n_layers": 3,
+        "hidden_dim": 1024,
         "hidden_dim_decay": 0.5,
         "embedding_dim": 4,
         "dropout": 0.3,
         "weight_decay": 1e-3,
         "seed": 67,
         "scheduler_patience": 2,
-        "early_stop_patience": 5,
+        "early_stop_patience": 10,
         "val_ratio": 0.2,
         "test_ratio": 0.1,
         "columns": features,
-        "horizon": 10,
-        "target": "target_return_3_class",
-        "lag_features": False,
-        "lags": [1, 2, 5, 10],
+        "horizon": 20,
+        "target": "target_return_binary",
+        "lag_features": True,
+        "lags": [1, 2, 5, 10, 50, 100, 200],
         "classification": True,
+        "class_threshold": 0.7,
         # Transformer config
-        "transformer": True,
-        "seq_len": 1,
+        "transformer": False,
+        "seq_len": 20,
         "d_model": 64,
         "activation_fn": "relu",
         "encoder_layers": 4,
-        "n_atten_head": 8,  # Even n.o heads
+        "n_atten_head": 4,  # Even n.o heads
+        "feature_z_score_window": 252,
     }
 
     torch.manual_seed(config["seed"])
@@ -94,10 +99,11 @@ def train() -> None:
             "lag_features": config["lag_features"],
             "lags": config["lags"],
             "columns": config["columns"],
+            "class_threshold": config["class_threshold"],
+            "feature_z_score_window": config["feature_z_score_window"],
         },
     )
     df = df.dropna()
-
     ticker_to_id = {t: i for i, t in enumerate(tickers)}
     df["ticker_id"] = df["Ticker"].map(ticker_to_id)
     num_tickers = len(tickers)
@@ -206,7 +212,10 @@ def train() -> None:
     val_loss_baseline = evaluate_with_embedding(
         model, val_loader, criterion, device, config["classification"]
     )
-    print(f"^^^ Random model accuracy; val loss = {val_loss_baseline}")
+    if config["classification"]:
+        print("^^^ Random model accuracy;")
+    print(f"Random val loss = {val_loss_baseline}")
+
     train_full_with_embedding(
         model,
         train_loader,
@@ -237,6 +246,7 @@ def train() -> None:
         "num_unique_embeddings": num_tickers,
         "embedding_dim": config["embedding_dim"],
         "lag_features": config["lag_features"],
+        "lags": config["lags"],
         "classification": config["classification"],
         "out_dim": config["out_dim"],
         "transformer": config["transformer"],

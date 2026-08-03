@@ -5,19 +5,18 @@ from numpy.typing import NDArray
 import torch
 
 
-class Classification3(Strategy):
-    predictions_path: str = "strategy/predictions.pth"
+class Classification(Strategy):
+    predictions_path: str = "backtest/predictions.pth"
+    past_ref_len: int = 10
 
     def init(self) -> None:
         predictions = torch.load(self.predictions_path, weights_only=False)
         self.predictions = self.I(lambda: predictions)
 
     def next(self) -> None:
-        if np.isnan(self.predictions[-1]):
-            # Some features still NaN
-            return
-        if self.predictions == 2:
+        if np.mean(self.predictions[-self.past_ref_len :]) > 0.5:
             self.buy(size=0.1)
-            print("Attempting buy")
-        elif self.predictions == 0:
+            print("Attempting buy size")
+        elif np.mean(self.predictions[-self.past_ref_len :]) < 0.3:
+            print("Closing positions")
             self.position.close()

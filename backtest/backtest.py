@@ -5,7 +5,8 @@ import pandas as pd
 import torch
 from models.EncoderTransformer import EncoderTransformer
 from models.mlp import MLP
-from strategy.classification3 import Classification3
+from strategy import regression
+from strategy.classification import Classification
 from strategy.regression import Regression
 from strategy.simple_nn_regression import SimpleNNRegression
 from data import single_ticker_minimal, multiple_ticker
@@ -39,6 +40,7 @@ def precompute_outputs(ticker: str = "^GSPC") -> None:
         model = MLP(
             config["input_dim"],
             1 if not config["classification"] else config["out_dim"],
+            True,
             config["embedding_dim"],
             config["num_unique_embeddings"],
             config,
@@ -49,6 +51,7 @@ def precompute_outputs(ticker: str = "^GSPC") -> None:
         {
             "HORIZON": config["horizon"],
             "lag_features": config["lag_features"],
+            "lags": config["lags"],
             "columns": config["columns"],
         },
     )
@@ -67,13 +70,14 @@ def precompute_outputs(ticker: str = "^GSPC") -> None:
         X_tensor = X_tensor.to(device)
         y_tensor = y_tensor.to(device)
         ticker_tensor = ticker_tensor.to(device)
-
+        if config["seq_len"] > 1:
+            df = df.iloc[: -config["seq_len"] + 1]
     else:
         X: NDArray[np.float32] = df[cols].to_numpy()
         X_tensor = torch.tensor(X, device=device)
         ticker_to_id = config["ticker_to_id"]
         df["ticker_id"] = df["Ticker"].map(ticker_to_id)
-        ticker_tensor = (torch.tensor(df["ticker_id"].values, device=device),)
+        ticker_tensor = torch.tensor(df["ticker_id"].values, device=device)
     state_dict = torch.load("weights/embedded_model.pth")
     model.load_state_dict(state_dict)
     model.eval()
@@ -82,20 +86,28 @@ def precompute_outputs(ticker: str = "^GSPC") -> None:
             X_tensor,
             ticker_tensor,
         )
-    torch.save(outputs, "backtest/predictions.pth")
+    if config["classification"]:
+        outputs = torch.argmax(outputs, 1)
+    torch.save(outputs.squeeze().cpu().numpy(), "backtest/predictions.pth")
     torch.save(df.index[0], "backtest/start_date.pth")
+    torch.save(df.index[-1], "backtest/end_date.pth")
+    print("Outputs precomputed and saved")
 
 
 # %%
 def backtest(ticker: str = "^GSPC") -> None:
     df = load_dataset(ticker)
     df = preprocess_dataset(df)
-
+    config_path = "weights/config.pth"
+    config = torch.load("weights/embedded_config.pth", weights_only=False)
     start = torch.load("backtest/start_date.pth", weights_only=False)
+    end = torch.load("backtest/end_date.pth", weights_only=False)
 
-    df = df[start:]
-
-    bt = Backtest(df, Classification3, cash=100_000, commission=0.0)
+    df = df[start:end]
+    strategy = Classification if config["classification"] else Regression
+    bt = Backtest(
+        df, strategy, cash=100_000, commission=0.0, finalize_trades=True
+    )
 
     stats = bt.run()
     print(stats)
