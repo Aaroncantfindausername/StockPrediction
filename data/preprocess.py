@@ -46,8 +46,10 @@ def robust_z_score(x, clip_threshold=3):
     mad = (x - med).abs().median()
     if mad == 0:
         return pd.Series(0.0, index=x.index)
-    return ((x - med) / (mad * 1.4826)).clip(
-        lower=-clip_threshold, upper=clip_threshold
+    return (
+        ((x - med) / (mad * 1.4826))
+        .clip(lower=-clip_threshold, upper=clip_threshold)
+        .astype(np.float32)
     )
 
 

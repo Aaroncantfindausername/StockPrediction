@@ -7,6 +7,7 @@ from models.EncoderTransformer import EncoderTransformer
 from models.mlp import MLP
 from strategy import regression
 from strategy.classification import Classification
+from strategy.rank_regression import RankRegression
 from strategy.regression import Regression
 from strategy.simple_nn_regression import SimpleNNRegression
 from data import single_ticker_minimal, multiple_ticker
@@ -15,8 +16,6 @@ from train.pipeline import create_sequential_windows_multiple_tickers
 
 
 def precompute_outputs(ticker: str = "^GSPC") -> None:
-    model_path = "weights/model.pth"
-    config_path = "weights/config.pth"
     device = "cpu"
     config = torch.load("weights/embedded_config.pth", weights_only=False)
     out_dim = config["out_dim"] if config["classification"] else 1
@@ -45,19 +44,22 @@ def precompute_outputs(ticker: str = "^GSPC") -> None:
             config["num_unique_embeddings"],
             config,
         ).to(device)
-
-    df, cols = multiple_ticker.get_feature_target_df(
-        [ticker],
-        {
-            "HORIZON": config["horizon"],
-            "lag_features": config["lag_features"],
-            "lags": config["lags"],
-            "columns": config["columns"],
-        },
-    )
-
-    df["ticker_id"] = df["Ticker"].map(config["ticker_to_id"])
-    df = df.dropna()
+    df = pd.read_parquet("datasets/dataframe.parquet")
+    df = df[df["Ticker"] == ticker]
+    cols = config["columns"]
+    # df, cols = multiple_ticker.get_feature_target_df(
+    #     [ticker],
+    #     {
+    #         "HORIZON": config["horizon"],
+    #         "lag_features": config["lag_features"],
+    #         "lags": config["lags"],
+    #         "columns": config["columns"],
+    #         "cross_sectional_z_score": config["cross_sectional_z_score"],
+    #     },
+    # )
+    #
+    # df["ticker_id"] = df["Ticker"].map(config["ticker_to_id"])
+    # df = df.dropna()
     if config["transformer"]:
         X_tensor, ticker_tensor, y_tensor = (
             create_sequential_windows_multiple_tickers(
@@ -104,7 +106,13 @@ def backtest(ticker: str = "^GSPC") -> None:
     end = torch.load("backtest/end_date.pth", weights_only=False)
 
     df = df[start:end]
-    strategy = Classification if config["classification"] else Regression
+    strategy = (
+        Classification
+        if config["classification"]
+        else RankRegression
+        if config["cross_sectional_z_score"]
+        else Regression
+    )
     bt = Backtest(
         df, strategy, cash=100_000, commission=0.0, finalize_trades=True
     )

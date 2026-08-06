@@ -17,6 +17,10 @@ def compute_features_and_labels(
     lags = params.get("lags", [1, 2, 3, 5])
     for feat in lagged_features:
         for lag in lags:
-            df[f"{feat}_lag{lag}_z"] = df[f"{feat}_z"].shift(lag)
-            cols.append(f"{feat}_lag{lag}_z")
+            if params.get("cross_section_z_score", False):
+                df[f"{feat}_lag{lag}"] = df[f"{feat}"].shift(lag)
+                cols.append(f"{feat}_lag{lag}")
+            else:
+                df[f"{feat}_lag{lag}_z"] = df[f"{feat}_z"].shift(lag)
+                cols.append(f"{feat}_lag{lag}_z")
     return cols, df

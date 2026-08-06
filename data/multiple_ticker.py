@@ -3,6 +3,7 @@ import pandas as pd
 from data.preprocess import load_dataset, preprocess_dataset, robust_z_score
 from data.single_ticker_minimal import compute_features_and_labels
 from data import single_ticker_lagged
+import numpy as np
 
 
 def get_feature_target_df(
@@ -28,5 +29,13 @@ def get_feature_target_df(
     df_long = pd.concat(dfs)
     for c in cols:
         cols_z.append(f"{c}_z")
-    df_long[cols_z] = df_long.groupby("Date")[cols].transform(robust_z_score)
+    if params.get("cross_sectional_z_score", False):
+        df_long[cols_z] = df_long.groupby("Date")[cols].transform(
+            robust_z_score
+        )
+        df_long["target_return_cross_rank"] = (
+            df_long.groupby("Date")["target_return"]
+            .rank(pct=True)
+            .astype(np.float32)
+        )
     return df_long, cols_z

@@ -3,14 +3,14 @@ from backtest.plot import plot_predictions, plot_predictions_embd
 from train.train import train
 from train.train_eval import train_eval
 from train import testing
-from train import train_multiple_ticker, train_cross_sectional_ticker
+from train import train_multiple_ticker
 
 if __name__ == "__main__":
     # testing.test()
-    train_multiple_ticker.train()
+    # train_multiple_ticker.train()
     # train()
     # train_eval()
-    # precompute_outputs("GOOGL")
-    # backtest("GOOGL")
+    # precompute_outputs("SPY")
+    backtest("SPY")
     # plot_predictions(True)
     # plot_predictions_embd("GOOGL")
