@@ -7,6 +7,7 @@ from data import single_ticker_minimal
 from data.preprocess import rolling_z_score
 
 
+# TODO fix for cross-sectional z score
 def compute_features_and_labels(
     df: pd.DataFrame, params: Dict[str, Any] = {}
 ) -> Tuple[list[str], pd.DataFrame]:

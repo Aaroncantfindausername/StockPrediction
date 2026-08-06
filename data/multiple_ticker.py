@@ -1,6 +1,6 @@
 from typing import Any, Dict, Tuple
 import pandas as pd
-from data.preprocess import load_dataset, preprocess_dataset
+from data.preprocess import load_dataset, preprocess_dataset, robust_z_score
 from data.single_ticker_minimal import compute_features_and_labels
 from data import single_ticker_lagged
 
@@ -11,6 +11,7 @@ def get_feature_target_df(
 
     dfs: list[pd.DataFrame] = []
     cols: list[str] = []
+    cols_z: list[str] = []
     for t in tickers:
         ticker_df = load_dataset(t)
         ticker_df = preprocess_dataset(ticker_df)
@@ -25,4 +26,7 @@ def get_feature_target_df(
         ticker_df["Ticker"] = [t] * len(ticker_df)
         dfs.append(ticker_df)
     df_long = pd.concat(dfs)
-    return df_long, cols
+    for c in cols:
+        cols_z.append(f"{c}_z")
+    df_long[cols_z] = df_long.groupby("Date")[cols].transform(robust_z_score)
+    return df_long, cols_z

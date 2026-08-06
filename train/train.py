@@ -5,6 +5,7 @@ import torch.optim as optim
 import numpy as np
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.dataset import TensorDataset
+from data.single_ticker_fundamental import compute_fundamental_features
 from models.EncoderTransformer import EncoderTransformer
 from models.mlp import MLP
 from data.preprocess import load_dataset, preprocess_dataset
@@ -15,6 +16,7 @@ from train.pipeline import (
     train_val_test_split_loader,
 )
 from data import single_ticker_lagged, single_ticker_minimal
+import pandas as pd
 
 
 def train() -> None:
@@ -35,10 +37,10 @@ def train() -> None:
         # "obv_roc",
         # "volume_ratio",
         "Close",
-        # "Open",
-        # "High",
-        # "Low",
-        # "Volume",
+        "Open",
+        "High",
+        "Low",
+        "Volume",
     ]
     config = {
         "batch_size": 256,
@@ -69,6 +71,7 @@ def train() -> None:
         "activation_fn": "relu",
         "encoder_layers": 2,
         "n_atten_head": 8,  # Even n.o heads
+        "fundamental_data": True,
     }
 
     torch.manual_seed(config["seed"])
@@ -84,13 +87,32 @@ def train() -> None:
 
     cols, df = (
         single_ticker_lagged.compute_features_and_labels(
-            df, {"HORIZON": config["horizon"], "lags": config["lags"]}
+            df,
+            {
+                "HORIZON": config["horizon"],
+                "lags": config["lags"],
+                "columns": config["columns"],
+            },
         )
         if config["lag_features"]
         else single_ticker_minimal.compute_features_and_labels(
-            df, {"HORIZON": config["horizon"]}
+            df,
+            {
+                "HORIZON": config["horizon"],
+                "columns": config["columns"],
+            },
         )
     )
+    if config["fundamental_data"]:
+        shiller_df = load_dataset("shiller_data")
+        shiller_df["Date"] = pd.to_datetime(shiller_df["Date"])
+        shiller_df.set_index("Date")
+        shiller_cols = shiller_df.columns
+        df = df.join(shiller_df, how="outer")
+        df[shiller_cols].ffill(inplace=True)
+        # forward fill
+        df = compute_fundamental_features(df, {"columns": [""]})
+
     df = df.dropna()
 
     if config["transformer"]:

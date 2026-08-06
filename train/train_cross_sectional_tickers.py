@@ -66,6 +66,7 @@ def train() -> None:
         "val_ratio": 0.2,
         "test_ratio": 0.1,
         "columns": features,
+        "cross_sectional_z_score": True,
         "horizon": 20,
         "target": "target_return_binary",
         "lag_features": False,
@@ -103,10 +104,13 @@ def train() -> None:
             "columns": config["columns"],
             "class_threshold": config["class_threshold"],
             "feature_z_score_window": config["feature_z_score_window"],
+            "cross_sectional_z_score": config["cross_sectional_z_score"],
         },
     )
     # %%
-    df.dropna(inplace=True)
+    df = df.groupby("Date").filter(
+        lambda g: len(g) == num_tickers and g[cols].notna().all(axis=1).all()
+    )
     ticker_to_id = {t: i for i, t in enumerate(tickers)}
     df["ticker_id"] = df["Ticker"].map(ticker_to_id)
     num_tickers = len(tickers)

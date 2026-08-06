@@ -120,25 +120,26 @@ def compute_features_and_labels(
             df["avg+std_cumulative_daily_return"]
         )
     df["target_return_over_atr"] = df["target_return"] / df["atr"]
-    for i, col in enumerate(columns):
-        df[f"{col}_z"] = rolling_z_score(
-            df[col], params.get("feature_z_score_window", 252)
+    if not params.get("cross_sectional_z_score", False):
+        for i, col in enumerate(columns):
+            df[f"{col}_z"] = rolling_z_score(
+                df[col], params.get("feature_z_score_window", 252)
+            )
+            columns_z[i] = f"{col}_z"
+        df["target_scaled_z"] = rolling_z_score(df["target_scaled"])
+        df["dist_ema_fast_z"] = rolling_z_score(df["dist_ema_fast"])
+        df["target_return_z"] = rolling_z_score(df["target_return"])
+        df["target_return_over_atr_z"] = rolling_z_score(
+            df["target_return_over_atr"]
         )
-        columns_z[i] = f"{col}_z"
-    df["target_scaled_z"] = rolling_z_score(df["target_scaled"])
-    df["dist_ema_fast_z"] = rolling_z_score(df["dist_ema_fast"])
-    df["target_return_z"] = rolling_z_score(df["target_return"])
-    df["target_return_over_atr_z"] = rolling_z_score(
-        df["target_return_over_atr"]
-    )
-    df["avg_1d_return_z"] = rolling_z_score(df["avg_1d_return"])
-    df["target_return_binary"] = (df["target_return_z"] > 0.0).astype(int)
-    df["target_return_pos_neg"] = (df["target_return"] > 0.0).astype(int)
-    threshold = params.get("class_threshold", 0.3)
-    df["target_return_classes"] = pd.cut(
-        df["target_return_z"],
-        bins=[-np.inf, -threshold, 0, threshold, np.inf],
-        labels=[0, 1, 2, 3],
-    )
-    df["target_return_z_clipped"] = df["target_return_z"].clip(-2.5, 2.5)
+        df["avg_1d_return_z"] = rolling_z_score(df["avg_1d_return"])
+        df["target_return_binary"] = (df["target_return_z"] > 0.0).astype(int)
+        df["target_return_pos_neg"] = (df["target_return"] > 0.0).astype(int)
+        threshold = params.get("class_threshold", 0.3)
+        df["target_return_classes"] = pd.cut(
+            df["target_return_z"],
+            bins=[-np.inf, -threshold, 0, threshold, np.inf],
+            labels=[0, 1, 2, 3],
+        )
+        df["target_return_z_clipped"] = df["target_return_z"].clip(-2.5, 2.5)
     return columns_z, df
