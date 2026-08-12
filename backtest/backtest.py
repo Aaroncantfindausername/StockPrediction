@@ -1,4 +1,8 @@
+from typing import Tuple
+import matplotlib.pyplot as plt
 from backtesting import Backtest
+import json
+import bt
 from numpy.typing import NDArray
 from data.preprocess import load_dataset, preprocess_dataset
 import pandas as pd
@@ -15,7 +19,13 @@ import numpy as np
 from train.pipeline import create_sequential_windows_multiple_tickers
 
 
-def precompute_outputs(ticker: str = "^GSPC") -> None:
+def precompute_outputs(
+    start_date: pd.DatetimeIndex,
+    end_date: pd.DatetimeIndex,
+    ticker: str = "^GSPC",
+    df: pd.DataFrame | None = None,
+    save: bool = True,
+) -> NDArray | None:
     device = "cpu"
     config = torch.load("weights/embedded_config.pth", weights_only=False)
     out_dim = config["out_dim"] if config["classification"] else 1
@@ -44,22 +54,11 @@ def precompute_outputs(ticker: str = "^GSPC") -> None:
             config["num_unique_embeddings"],
             config,
         ).to(device)
-    df = pd.read_parquet("datasets/dataframe.parquet")
+    if df is None:
+        df = pd.read_parquet("datasets/dataframe.parquet")
     df = df[df["Ticker"] == ticker]
+    df = df[start_date:end_date]
     cols = config["columns"]
-    # df, cols = multiple_ticker.get_feature_target_df(
-    #     [ticker],
-    #     {
-    #         "HORIZON": config["horizon"],
-    #         "lag_features": config["lag_features"],
-    #         "lags": config["lags"],
-    #         "columns": config["columns"],
-    #         "cross_sectional_z_score": config["cross_sectional_z_score"],
-    #     },
-    # )
-    #
-    # df["ticker_id"] = df["Ticker"].map(config["ticker_to_id"])
-    # df = df.dropna()
     if config["transformer"]:
         X_tensor, ticker_tensor, y_tensor = (
             create_sequential_windows_multiple_tickers(
@@ -90,20 +89,26 @@ def precompute_outputs(ticker: str = "^GSPC") -> None:
         )
     if config["classification"]:
         outputs = torch.argmax(outputs, 1)
-    torch.save(outputs.squeeze().cpu().numpy(), "backtest/predictions.pth")
-    torch.save(df.index[0], "backtest/start_date.pth")
-    torch.save(df.index[-1], "backtest/end_date.pth")
-    print("Outputs precomputed and saved")
+    if save:
+        torch.save(
+            outputs.squeeze().cpu().numpy(),
+            f"backtest/precomputed_data/{ticker}_predictions.pth",
+        )
+        print("Outputs precomputed and saved")
+        return
+    else:
+        return outputs.squeeze().cpu().numpy()
 
 
 # %%
-def backtest(ticker: str = "^GSPC") -> None:
+def backtest(
+    ticker: str, start_date: pd.DatetimeIndex, end_date: pd.DatetimeIndex
+) -> None:
     df = load_dataset(ticker)
     df = preprocess_dataset(df)
-    config_path = "weights/config.pth"
     config = torch.load("weights/embedded_config.pth", weights_only=False)
-    start = torch.load("backtest/start_date.pth", weights_only=False)
-    end = torch.load("backtest/end_date.pth", weights_only=False)
+    start = torch.load(f"backtest/{ticker}_start_date.pth", weights_only=False)
+    end = torch.load(f"backtest/{ticker}_end_date.pth", weights_only=False)
 
     df = df[start:end]
     strategy = (
@@ -114,15 +119,112 @@ def backtest(ticker: str = "^GSPC") -> None:
         else Regression
     )
     bt = Backtest(
-        df, strategy, cash=100_000, commission=0.0, finalize_trades=True
+        df,
+        strategy,
+        cash=100_000,
+        commission=0.0,
+        finalize_trades=True,
     )
 
-    stats = bt.run()
+    stats = bt.run(predictions_path=f"backtest/{ticker}_predictions.pth")
+    print(ticker)
     print(stats)
     bt.plot(
-        filename="plots/plot",
+        filename=f"plots/{ticker}_backtest",
         resample=True,
         smooth_equity=True,
         plot_volume=False,
         open_browser=False,
     )
+
+
+def backtest_tickers(
+    ticker_list_path: str,
+    start_date: pd.DatetimeIndex,
+    end_date: pd.DatetimeIndex,
+) -> None:
+
+    with open(ticker_list_path, "r") as f:
+        tickers = [line.strip() for line in f if line.strip()]
+        f.close()
+    for t in tickers:
+        backtest(t, start_date, end_date)
+
+
+def precompute_tickers(
+    ticker_list_path: str,
+    start_date: pd.DatetimeIndex,
+    end_date: pd.DatetimeIndex,
+) -> None:
+    with open(ticker_list_path, "r") as f:
+        tickers = [line.strip() for line in f if line.strip()]
+    for t in tickers:
+        precompute_outputs(start_date, end_date, t)
+
+
+def multi_ticker_backtest(
+    ticker_list_path: str,
+    start: pd.DatetimeIndex,
+    end: pd.DatetimeIndex,
+    n=5,
+) -> None:
+    with open(ticker_list_path, "r") as f:
+        tickers = [line.strip() for line in f if line.strip()]
+        f.close()
+    config = torch.load("weights/embedded_config.pth", weights_only=False)
+    dfs = []
+    scores = []
+    for ticker in tickers:
+        df = load_dataset(ticker)
+        df = preprocess_dataset(df)
+        df.rename(columns={"Close": ticker}, inplace=True)
+        predictions = torch.load(
+            f"backtest/precomputed_data/{ticker}_predictions.pth",
+            weights_only=False,
+        )
+        score = pd.Series(predictions, index=df[start:end].index, name=ticker)
+        scores.append(score)
+        df = df[start:end]
+        dfs.append(df[ticker])
+    df_wide = pd.concat(dfs, axis=1, join="inner")
+    scores_df = pd.concat(scores, axis=1, join="inner")
+    weights = pd.DataFrame(0.0, index=df_wide.index, columns=df_wide.columns)
+
+    for date in df_wide.index:
+        s = scores_df.loc[date]
+        assert len(s) > n * 2, "Scores should not have any missing values"
+        top_n = s.nlargest(n).index
+        weights.loc[date, top_n] = 1.0 / n  # Equal allocation
+
+    strategy = bt.Strategy(
+        "Top 5 monthly rotation",
+        [
+            bt.algos.RunWeekly(),
+            bt.algos.SelectAll(),
+            bt.algos.WeighTarget(weights),
+            bt.algos.Rebalance(),
+        ],
+    )
+    backtest = bt.Backtest(
+        strategy,
+        df_wide,
+        initial_capital=100_000,
+        integer_positions=False,
+        # commissions=lambda q, p: max(1, abs(q) * 0.0005),
+    )
+    result = bt.run(backtest)
+    result.display()
+    result.plot()
+    plt.show()
+
+
+def get_common_dates(
+    df: pd.DataFrame,
+) -> Tuple[pd.DatetimeIndex, pd.DatetimeIndex]:
+    start_dates = []
+    end_dates = []
+    for t in df["Ticker"].unique():
+        d = df.query("Ticker == @t").index
+        start_dates.append(d[0])
+        end_dates.append(d[-1])
+    return (max(start_dates), min(end_dates))
