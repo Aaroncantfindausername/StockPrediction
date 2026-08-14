@@ -1,4 +1,5 @@
-from typing import Tuple
+from operator import xor
+from typing import Any, Dict, Tuple
 import matplotlib.pyplot as plt
 from backtesting import Backtest
 import json
@@ -139,53 +140,70 @@ def backtest(
 
 
 def backtest_tickers(
-    ticker_list_path: str,
+    tickers: list[str],
     start_date: pd.DatetimeIndex,
     end_date: pd.DatetimeIndex,
 ) -> None:
 
-    with open(ticker_list_path, "r") as f:
-        tickers = [line.strip() for line in f if line.strip()]
-        f.close()
     for t in tickers:
         backtest(t, start_date, end_date)
 
 
 def precompute_tickers(
-    ticker_list_path: str,
+    tickers: list[str],
     start_date: pd.DatetimeIndex,
     end_date: pd.DatetimeIndex,
-) -> None:
-    with open(ticker_list_path, "r") as f:
-        tickers = [line.strip() for line in f if line.strip()]
+    save: bool = True,
+    df: pd.DataFrame | None = None,
+) -> Dict[str, Any] | None:
+    outputs_dict: Dict[str, Any] = {}
     for t in tickers:
-        precompute_outputs(start_date, end_date, t)
+        outputs = precompute_outputs(start_date, end_date, t, df=df, save=save)
+        if outputs is not None:
+            outputs_dict[t] = outputs
+    if not save:
+        return outputs_dict
 
 
 def multi_ticker_backtest(
-    ticker_list_path: str,
     start: pd.DatetimeIndex,
     end: pd.DatetimeIndex,
-    n=5,
-) -> None:
-    with open(ticker_list_path, "r") as f:
-        tickers = [line.strip() for line in f if line.strip()]
-        f.close()
-    config = torch.load("weights/embedded_config.pth", weights_only=False)
+    ticker_list_path: str | None = None,
+    outputs_dict: Dict[str, Any] | None = None,
+    n: int = 5,
+    plot: bool = False,
+    save_path: str | None = None,
+) -> pd.DataFrame:
     dfs = []
     scores = []
+    if ticker_list_path is not None:
+        with open(ticker_list_path, "r") as f:
+            tickers = [line.strip() for line in f if line.strip()]
+            f.close()
+    elif outputs_dict is not None:
+        tickers = outputs_dict.keys()
+    else:
+        assert False, "Function accepts one of ticker_list_path or outputs_dict"
     for ticker in tickers:
         df = load_dataset(ticker)
         df = preprocess_dataset(df)
         df.rename(columns={"Close": ticker}, inplace=True)
-        predictions = torch.load(
-            f"backtest/precomputed_data/{ticker}_predictions.pth",
-            weights_only=False,
-        )
+        if ticker_list_path is not None:
+            predictions = torch.load(
+                f"backtest/precomputed_data/{ticker}_predictions.pth",
+                weights_only=False,
+            )
+        elif outputs_dict is not None:
+            predictions = outputs_dict[ticker]
+        else:
+            assert False, (
+                "Function accepts one of ticker_list_path or outputs_dict"
+            )
         score = pd.Series(predictions, index=df[start:end].index, name=ticker)
         scores.append(score)
         df = df[start:end]
         dfs.append(df[ticker])
+
     df_wide = pd.concat(dfs, axis=1, join="inner")
     scores_df = pd.concat(scores, axis=1, join="inner")
     weights = pd.DataFrame(0.0, index=df_wide.index, columns=df_wide.columns)
@@ -214,8 +232,12 @@ def multi_ticker_backtest(
     )
     result = bt.run(backtest)
     result.display()
-    result.plot()
-    plt.show()
+    if plot:
+        result.plot()
+        plt.show()
+    if save_path is not None:
+        result.stats.to_pickle(f"{save_path}.pkl")
+    return result.stats
 
 
 def get_common_dates(
