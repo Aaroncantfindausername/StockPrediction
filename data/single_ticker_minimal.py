@@ -1,4 +1,4 @@
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, final
 import talib
 import pandas as pd
 from data.preprocess import rolling_z_score
@@ -22,9 +22,9 @@ def compute_features_and_labels(
 
     rsi_fast_t = params.get("rsi_fast_t", 7)
     rsi_slow_t = params.get("rsi_slow_t", 14)
-    df[f"rsi_slow"] = talib.RSI(df["Close"], timeperiod=rsi_fast_t)
+    df[f"rsi_slow"] = talib.RSI(df["Close"], timeperiod=rsi_slow_t)
 
-    df[f"rsi_fast"] = talib.RSI(df["Close"], timeperiod=rsi_slow_t)
+    df[f"rsi_fast"] = talib.RSI(df["Close"], timeperiod=rsi_fast_t)
 
     macd_fastperiod = params.get("macd_fastperiod", 12)
     macd_slowperiod = params.get("macd_slowperiod", 26)
@@ -68,10 +68,13 @@ def compute_features_and_labels(
     df["dist_ema_slow"] = (df["Close"] - df["ema_slow"]) / df["ema_slow"]
 
     sma_fast_t = params.get("sma_fast_t", 50)
+    sma_vfast_t = params.get("sma_vfast_t", 14)
     sma_slow_t = params.get("sma_slow_t", 200)
     df["sma_fast"] = talib.SMA(df["Close"], timeperiod=sma_fast_t)
+    df["sma_vfast"] = talib.SMA(df["Close"], timeperiod=sma_vfast_t)
     df["sma_slow"] = talib.SMA(df["Close"], timeperiod=sma_slow_t)
     df["dist_sma_fast"] = (df["Close"] - df["sma_fast"]) / df["sma_fast"]
+    df["dist_sma_vfast"] = (df["Close"] - df["sma_vfast"]) / df["sma_vfast"]
     df["dist_sma_slow"] = (df["Close"] - df["sma_slow"]) / df["sma_slow"]
     obv_roc_t = params.get("obv_roc_t", 5)
     df["obv"] = talib.OBV(df["Close"], df["Volume"])

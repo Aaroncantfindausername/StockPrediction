@@ -19,6 +19,7 @@ from train.pipeline import (
     train_val_test_split_loader,
 )
 from data import multiple_ticker, single_ticker_lagged, single_ticker_minimal
+import pandas as pd
 from train.ticker_embedding_dataset import TickerEmbeddingDataset
 
 
@@ -26,23 +27,24 @@ def train() -> None:
     # Hyperparameters
     # %%
     features: list[str] = [
-        "roc_slow",
-        "roc_fast",
-        "rsi_slow",
-        "rsi_fast",
-        "macd_hist",
-        "stochk",
-        "stochd",
-        "adx",
-        "pct_b",
-        "atr_norm",
-        "dist_ema_fast",
-        "dist_ema_slow",
-        "dist_sma_fast",
-        "dist_sma_slow",
-        "obv_roc",
+        # "roc_slow",
+        # "roc_fast",
+        # "rsi_slow",
+        # "rsi_fast",
+        # "macd_hist",
+        # "stochk",
+        # "stochd",
+        # "adx",
+        # "pct_b",
+        # "atr_norm",
+        # "dist_ema_fast",
+        # "dist_ema_slow",
+        # "dist_sma_fast",
+        # # "dist_sma_vfast",
+        # "dist_sma_slow",
+        # "obv_roc",
         "volume_ratio",
-        "ema_slow",
+        # "ema_slow",
         # "Close",
         # "Open",
         # "High",
@@ -50,19 +52,19 @@ def train() -> None:
         # "Volume",
     ]
     config = {
-        "batch_size": 2048,
+        "batch_size": 512,
         "lr": 1e-4,
         "epochs": 500,
         "out_dim": 2,
-        "n_layers": 3,
+        "n_layers": 4,
         "hidden_dim": 1024,
         "hidden_dim_decay": 0.5,
         "embedding_dim": 3,
         "dropout": 0.6,
-        "weight_decay": 1e-3,
+        "weight_decay": 1e-4,
         "seed": 67,
         "scheduler_patience": 10,
-        "early_stop_patience": 20,
+        "early_stop_patience": 50,
         "val_ratio": 0.2,
         "test_ratio": 0.1,
         "columns": features,
@@ -70,7 +72,7 @@ def train() -> None:
         "horizon": 20,
         "target": "target_return_cross_rank",
         "lag_features": False,
-        "lags": [1, 2, 5, 10, 50, 100, 200],
+        "lags": [1, 2, 5, 10, 30, 50, 100, 200],
         "classification": False,
         "class_threshold": 0.7,
         # Transformer config
@@ -88,12 +90,10 @@ def train() -> None:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
-
     # Load dataset
     with open("datasets/ETFs.txt", "r") as f:
         tickers = [line.strip() for line in f if line.strip()]
         num_tickers = len(tickers)
-        f.close()
 
     df, cols = multiple_ticker.get_feature_target_df(
         tickers,
@@ -111,7 +111,6 @@ def train() -> None:
     df.dropna(inplace=True)
     ticker_to_id = {t: i for i, t in enumerate(tickers)}
     df["ticker_id"] = df["Ticker"].map(ticker_to_id)
-    num_tickers = len(tickers)
     num_days = df.index.nunique()
     train_end = df.index[
         int(num_days * (1 - config["val_ratio"] - config["test_ratio"]))
@@ -231,10 +230,9 @@ def train() -> None:
         device,
         config["epochs"],
         config["early_stop_patience"],
-        load_best_val_loss=False,
+        load_best_val_loss=True,
         classification=config["classification"],
     )
-    # Load best weights for final evaluation
     test_loss = evaluate_with_embedding(
         model, test_loader, criterion, device, config["classification"]
     )
@@ -264,7 +262,8 @@ def train() -> None:
         "val_start": val_start,
     }
     torch.save(model.state_dict(), "weights/embedded_model.pth")
+    print("Model weights saved")
     df.to_parquet("datasets/dataframe.parquet", index=True)
     print("Dataframe saved")
     torch.save(model_config, "weights/embedded_config.pth")
-    print("Model weights and config stored")
+    print("Config saved")

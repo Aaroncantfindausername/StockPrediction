@@ -9,7 +9,8 @@ import numpy as np
 def get_feature_target_df(
     tickers: list[str], params: Dict[str, Any] = {}
 ) -> Tuple[pd.DataFrame, list[str]]:
-
+    start_date = params.get("start_date")
+    end_date = params.get("end_date")
     dfs: list[pd.DataFrame] = []
     cols: list[str] = []
     cols_z: list[str] = []
@@ -25,6 +26,10 @@ def get_feature_target_df(
             cs, ticker_df = compute_features_and_labels(ticker_df, params)
         cols = cs
         ticker_df["Ticker"] = [t] * len(ticker_df)
+        if start_date is not None:
+            ticker_df = ticker_df[start_date:]
+        if end_date is not None:
+            ticker_df = ticker_df[:end_date]
         dfs.append(ticker_df)
     df_long = pd.concat(dfs)
     for c in cols:

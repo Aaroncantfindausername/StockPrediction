@@ -1,20 +1,12 @@
-from functools import partial
-
-from optuna.pruners import MedianPruner
 import pandas as pd
-from sklearn.model_selection import train_test_split
+import pickle
 from backtest.backtest import (
     get_common_dates,
     multi_ticker_backtest,
     precompute_tickers,
 )
-from data import multiple_ticker
-from train import nn_objective
 from train.pipeline import walk_forward_validation_outer_embd
 import torch
-import optuna
-
-from train.ticker_embedding_dataset import TickerEmbeddingDataset
 
 
 def run():
@@ -24,6 +16,18 @@ def run():
         tickers = [line.strip() for line in f if line.strip()]
     out_dict = precompute_tickers(tickers, start, end, False)
     multi_ticker_backtest(start, end, outputs_dict=out_dict, n=5, plot=True)
+
+
+def backtest_full():
+    print("BEGINNING BACKTEST FULL")
+    start = pd.Timestamp("2017-02-13")
+    end = pd.Timestamp("2026-02-12")
+    with open("backtest/precomputed_data/data.pkl", "rb") as f:
+        outputs_dict = pickle.load(f)
+    multi_ticker_backtest(
+        start, end, outputs_dict=outputs_dict, plot=True, baseline=False
+    )
+    print("BACKTEST COMPLETE")
 
 
 def walk_forward_validation():
@@ -62,13 +66,15 @@ def walk_forward_validation():
         10,
         20,
         1,
-        20,
+        30,
         features,
         "target_return_cross_rank",
         device,
         batch_size=256,
         embedding_dim=3,
         epochs=1000,
-        trials_timeout=600,
-        n_trials=4,
+        trials_timeout=1000,
+        n_trials=20,
+        save=True,
     )
+    print("WALK FORWARD VALIDATION SCRIPT COMPLETE")

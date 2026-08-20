@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "backtesting>=0.6.5",
+  "bt>=1.2.0",
   "ipython>=9.14.1",
   "matplotlib>=3.11.0",
   "numpy>=2.2.6",

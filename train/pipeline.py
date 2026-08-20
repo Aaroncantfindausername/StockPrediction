@@ -1,10 +1,12 @@
 # %%
+import pickle
 from typing import Any, Tuple, Union
 from multitasking import Dict
 import optuna
 import pandas as pd
 from numpy.typing import NDArray
 from pandas import DataFrame, DatetimeIndex
+from sqlalchemy.sql.base import InPlaceGenerative
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
@@ -13,8 +15,10 @@ import copy
 from optuna.pruners import MedianPruner
 from functools import partial
 
+from data import multiple_ticker
 from data.single_ticker_minimal import compute_features_and_labels
-from models.basic_nn import MLP
+from models.mlp import MLP
+from train.ticker_embedding_dataset import TickerEmbeddingDataset
 
 
 # %%
@@ -103,35 +107,43 @@ def create_sequential_windows_single_tickers(
     return X_tensor, y_tensor
 
 
-def walk_forward_validation_outer(
-    df: DataFrame,
+def walk_forward_validation_outer_embd(
+    tickers: list[str],
+    start_date: DatetimeIndex,
+    end_date: DatetimeIndex,
     min_training_years: int,
     max_training_years: int,
     test_years: int,
-    HORIZON: int,
+    purge_embargo_gap: int,
+    features: list[str],
+    target_column: str,
     device: Union[str, torch.device],
-    batch_size: int = 64,
+    embedding_dim: int = 3,
+    batch_size: int = 256,
     epochs: int = 100,
-    train_patience: int = 10,
+    train_patience: int = 30,
+    scheduler_patience: int = 10,
     random_seed: int = 67,
     n_trials: int = 100,
     trials_timeout: int = 120,
-) -> Tuple[Dict[str, Any], list[NDArray]]:
-    import train.nn_objective  # Prevent circular import
+    save: bool = False,
+) -> Tuple[list, Dict[str, Any]]:
+    import train.nn_objective
+    from backtest.backtest import multi_ticker_backtest, precompute_tickers
 
-    all_predictions: list[NDArray] = []
+    all_results: list[DataFrame] = []
+    all_predictions_dict = {t: np.array([]) for t in tickers}
     MIN_TEST_PERIOD = pd.DateOffset(months=6)
-    start_train_date: DatetimeIndex = df.index[0]
-    end_train_date: DatetimeIndex = df.index[0] + pd.DateOffset(
-        years=min_training_years, days=-(1 + HORIZON)
+    start_train_date: DatetimeIndex = start_date
+    end_train_date: DatetimeIndex = start_date + pd.DateOffset(
+        years=min_training_years, days=-(1 + purge_embargo_gap)
     )
-    start_test_date: DatetimeIndex = df.index[0] + pd.DateOffset(
+    start_test_date: DatetimeIndex = start_date + pd.DateOffset(
         years=min_training_years
     )  # Offset by HORIZON (purging)
 
-    config = {"start": start_test_date, "step": test_years}
     fold = 0
-    data_end_date = df.index[-1]
+    data_end_date = end_date
     end_test_date: DatetimeIndex = start_test_date
     while start_test_date + MIN_TEST_PERIOD <= data_end_date:
         end_test_date = min(
@@ -140,16 +152,18 @@ def walk_forward_validation_outer(
         )
         objective = partial(
             train.nn_objective.objective_full,
-            start_train_date=start_train_date,
-            end_train_date=end_train_date,
-            horizon=HORIZON,
-            df=df,
+            tickers=tickers,
+            start_date=start_train_date,
+            end_date=end_train_date,
+            target_column=target_column,
             device=device,
+            features=features,
+            embedding_dim=embedding_dim,
         )
-        pruner = MedianPruner(n_startup_trials=5, n_warmup_steps=1)
+        pruner = MedianPruner(n_startup_trials=5, n_warmup_steps=0)
         sampler = optuna.samplers.TPESampler(seed=random_seed)
         study = optuna.create_study(
-            direction="minimize", pruner=pruner, sampler=sampler
+            direction="maximize", pruner=pruner, sampler=sampler
         )
         study.optimize(
             objective,
@@ -158,46 +172,65 @@ def walk_forward_validation_outer(
         )
         print(f"Hyperparameters optimised:\n {study.best_params}")
         # Retrain model on all of training data using best hyperparams
-        cols, feature_df = compute_features_and_labels(
-            df[:end_test_date], study.best_params
-        )
-        train_df = feature_df[start_train_date:end_train_date].dropna()
-        test_df = feature_df[start_test_date:end_test_date]
-        X_trainval: NDArray[np.float32] = train_df[
-            [f"{c}_z" for c in cols]
-        ].to_numpy()
-        y_trainval: NDArray[np.float32] = train_df["target_return_z"].to_numpy()
-        X_test: NDArray[np.float32] = test_df[
-            [f"{c}_z" for c in cols]
-        ].to_numpy()
-        assert any(test_df.isna()), "test_df contains na values"
-        X_train, X_val, y_train, y_val = train_test_split(
-            X_trainval, y_trainval, test_size=0.15, shuffle=False
-        )
-        train_dataset = TensorDataset(
-            torch.tensor(X_train), torch.tensor(y_train)
-        )
-        val_dataset = TensorDataset(torch.tensor(X_val), torch.tensor(y_val))
+        data_params = study.best_params | {
+            "columns": features,
+            "cross_sectional_z_score": True,
+        }
 
-        # Create DataLoaders
-        train_loader = DataLoader(
-            train_dataset, batch_size=batch_size, shuffle=True
+        df, cols = multiple_ticker.get_feature_target_df(
+            tickers,
+            data_params,
         )
-        val_loader = DataLoader(
-            val_dataset, batch_size=batch_size, shuffle=False
+        ticker_to_id = {t: i for i, t in enumerate(tickers)}
+        df["ticker_id"] = df["Ticker"].map(ticker_to_id)
+        df_train, df_val = train_test_split(
+            df[
+                (df.index >= start_train_date) & (df.index <= end_train_date)
+            ].sort_index(),
+            test_size=0.15,
+            shuffle=False,
         )
-        model = MLP(X_train.shape[1], 1, study.best_params).to(device)
-        criterion = torch.nn.HuberLoss()
+        assert type(df_train) is pd.DataFrame and type(df_val) is pd.DataFrame
+        train_dataset = TickerEmbeddingDataset(
+            df_train,
+            cols,
+            target_column,
+        )
+        val_dataset = TickerEmbeddingDataset(
+            df_val,
+            cols,
+            target_column,
+        )
+        train_loader = DataLoader(train_dataset, batch_size, True)
+        val_loader = DataLoader(val_dataset, batch_size, False)
+        model_params = study.best_params | {
+            "hidden_dim": 1024,
+            "n_layers": 3,
+            "hidden_dim_decay": 0.5,
+        }
+        model = MLP(
+            len(cols),
+            1,
+            True,
+            embedding_dim=embedding_dim,
+            num_unique_embeddings=len(tickers),
+            params=model_params,
+        ).to(device)
+        criterion = torch.nn.MSELoss()
         optimizer = torch.optim.Adam(
             model.parameters(),
-            lr=study.best_params["learning_rate"],
-            weight_decay=study.best_params["weight_decay"],
+            lr=1e-4,
+            weight_decay=1e-4,
         )
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode="min", patience=5, factor=0.5
+            optimizer,
+            mode="min",
+            patience=scheduler_patience,
+            factor=0.25,
+            threshold=0.0,
         )
         print(f"Evaluating years {start_test_date} ~ {end_test_date}")
-        train_full(
+        train_full_with_embedding(
             model,
             train_loader,
             val_loader,
@@ -207,12 +240,33 @@ def walk_forward_validation_outer(
             device,
             epochs,
             train_patience,
+            load_best_val_loss=True,
         )
-        model.eval()
-        with torch.no_grad():
-            predictions = model(torch.tensor(X_test).to(device)).cpu().numpy()
-            all_predictions.append(predictions)
-            print("Predictions calculated")
+
+        outputs_dict = precompute_tickers(
+            tickers,
+            start_test_date,
+            end_test_date,
+            df=df,
+            save=False,
+        )
+        assert outputs_dict is not None, (
+            "dict should be returned when not saving"
+        )
+        for k, v in outputs_dict.items():
+            all_predictions_dict[k] = np.concatenate(
+                [all_predictions_dict[k], v], axis=0
+            )
+
+        res = multi_ticker_backtest(
+            start_test_date,
+            end_test_date,
+            outputs_dict=outputs_dict,
+            n=5,
+            plot=False,
+            baseline=False,
+        )
+        all_results.append(res)
         # Shift train window to include test window and shift test window forwards
         fold += 1
         end_train_date += pd.DateOffset(years=test_years)
@@ -220,9 +274,12 @@ def walk_forward_validation_outer(
         if min_training_years + fold * test_years > max_training_years:
             start_train_date += pd.DateOffset(years=test_years)
         print(f"Outer fold {fold} complete")
-
-    config["end_date"] = end_test_date
-    return (config, all_predictions)
+    if save:
+        with open("backtest/results/results.pkl", "wb") as f:
+            pickle.dump(all_results, f)
+        with open("backtest/precomputed_data/data.pkl", "wb") as f:
+            pickle.dump(all_predictions_dict, f)
+    return (all_results, all_predictions_dict)
 
 
 # -------------------------------

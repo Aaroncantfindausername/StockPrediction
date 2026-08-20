@@ -25,28 +25,20 @@ def precompute_outputs(
     end_date: pd.DatetimeIndex,
     ticker: str = "^GSPC",
     df: pd.DataFrame | None = None,
+    model: torch.nn.Module | None = None,
+    config: Dict[str, Any] | None = None,
     save: bool = True,
 ) -> NDArray | None:
-    device = "cpu"
-    config = torch.load("weights/embedded_config.pth", weights_only=False)
-    out_dim = config["out_dim"] if config["classification"] else 1
-    if config["transformer"]:
-        model = EncoderTransformer(
-            config["input_dim"],
-            out_dim,
-            config["d_model"],
-            config["encoder_layers"],
-            config["n_atten_head"],
-            config["num_unique_embeddings"],
-            True,
-            config["embedding_dim"],
-            config["hidden_dim"],
-            0.0,
-            config["activation_fn"],
-            config["seq_len"],
-            device,
-        ).to(device)
-    else:
+    device = (
+        torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if model is None
+        else next(model.parameters()).device
+    )
+    if config is None:
+        config = torch.load("weights/embedded_config.pth", weights_only=False)
+
+    assert config is not None
+    if model is None:
         model = MLP(
             config["input_dim"],
             1 if not config["classification"] else config["out_dim"],
@@ -60,26 +52,11 @@ def precompute_outputs(
     df = df[df["Ticker"] == ticker]
     df = df[start_date:end_date]
     cols = config["columns"]
-    if config["transformer"]:
-        X_tensor, ticker_tensor, y_tensor = (
-            create_sequential_windows_multiple_tickers(
-                df,
-                cols,
-                config["target"],
-                config["seq_len"],
-            )
-        )
-        X_tensor = X_tensor.to(device)
-        y_tensor = y_tensor.to(device)
-        ticker_tensor = ticker_tensor.to(device)
-        if config["seq_len"] > 1:
-            df = df.iloc[: -config["seq_len"] + 1]
-    else:
-        X: NDArray[np.float32] = df[cols].to_numpy()
-        X_tensor = torch.tensor(X, device=device)
-        ticker_to_id = config["ticker_to_id"]
-        df["ticker_id"] = df["Ticker"].map(ticker_to_id)
-        ticker_tensor = torch.tensor(df["ticker_id"].values, device=device)
+    X: NDArray[np.float32] = df[cols].to_numpy()
+    X_tensor = torch.tensor(X, device=device)
+    ticker_to_id = config["ticker_to_id"]
+    df["ticker_id"] = df["Ticker"].map(ticker_to_id)
+    ticker_tensor = torch.tensor(df["ticker_id"].values, device=device)
     state_dict = torch.load("weights/embedded_model.pth")
     model.load_state_dict(state_dict)
     model.eval()
@@ -155,10 +132,14 @@ def precompute_tickers(
     end_date: pd.DatetimeIndex,
     save: bool = True,
     df: pd.DataFrame | None = None,
+    model: torch.nn.Module | None = None,
+    config: Dict[str, Any] | None = None,
 ) -> Dict[str, Any] | None:
     outputs_dict: Dict[str, Any] = {}
     for t in tickers:
-        outputs = precompute_outputs(start_date, end_date, t, df=df, save=save)
+        outputs = precompute_outputs(
+            start_date, end_date, t, df=df, save=save, model=model
+        )
         if outputs is not None:
             outputs_dict[t] = outputs
     if not save:
@@ -166,13 +147,14 @@ def precompute_tickers(
 
 
 def multi_ticker_backtest(
-    start: pd.DatetimeIndex,
-    end: pd.DatetimeIndex,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
     ticker_list_path: str | None = None,
     outputs_dict: Dict[str, Any] | None = None,
     n: int = 5,
     plot: bool = False,
     save_path: str | None = None,
+    baseline: bool = False,
 ) -> pd.DataFrame:
     dfs = []
     scores = []
@@ -230,10 +212,27 @@ def multi_ticker_backtest(
         integer_positions=False,
         # commissions=lambda q, p: max(1, abs(q) * 0.0005),
     )
-    result = bt.run(backtest)
+    if baseline:
+        baseline_strategy = bt.Strategy(
+            "Random baseline",
+            [
+                bt.algos.RunWeekly(),
+                bt.algos.SelectRandomly(5),
+                bt.algos.WeighEqually(),
+                bt.algos.Rebalance(),
+            ],
+        )
+        result = bt.backtest.benchmark_random(
+            backtest, baseline_strategy, nsim=100
+        )
+    else:
+        result = bt.run(backtest)
     result.display()
     if plot:
-        result.plot()
+        if baseline:
+            result.plot_histogram()
+        else:
+            result.plot()
         plt.show()
     if save_path is not None:
         result.stats.to_pickle(f"{save_path}.pkl")
