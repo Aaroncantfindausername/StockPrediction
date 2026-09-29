@@ -6,7 +6,6 @@ import optuna
 import pandas as pd
 from numpy.typing import NDArray
 from pandas import DataFrame, DatetimeIndex
-from sqlalchemy.sql.base import InPlaceGenerative
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
